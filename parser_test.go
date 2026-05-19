@@ -172,6 +172,44 @@ func TestParserFuncAdapter(t *testing.T) {
 	}
 }
 
+// TestLamodaVPNErrorShape — snapshot of the 403 VPN-detected body
+// shared by /recommendations/section, /information/get and
+// /cms/topmenu_flexible. The IP rides as `data.ip`; JSONKey("ip")
+// matches the first "ip":"..." token in the JSON regardless of
+// nesting depth. Pinned because all three endpoints in
+// DefaultEndpoints depend on this exact shape.
+func TestLamodaVPNErrorShape(t *testing.T) {
+	const body = `{"code":10403,"message":"Попробуйте отключить VPN или выбрать другую сеть Wi-Fi","title":"VPN мешает загрузке","data":{"ip":"159.195.6.55"}}`
+	p := JSONKey("ip")
+	got, err := p.Parse(nil, []byte(body))
+	if err != nil {
+		t.Fatalf("lamoda parse: %v", err)
+	}
+	if got != "159.195.6.55" {
+		t.Errorf("got %q, want 159.195.6.55", got)
+	}
+}
+
+// TestIviStateShape — snapshot of the single `"ip":"..."` token
+// from ivi.tv's embedded state JSON. Live body is 748 KB with the
+// token at byte ~266 K; the parser shape itself is plain JSONKey
+// and the byte-offset constraint lives on Endpoint.MaxBytes. Pin
+// the parser shape here because a future ivi redesign that moves
+// the IP into a nested key (`"client":{"ip":"..."}`) still parses
+// (regex matches anywhere) but a redesign that renames the key
+// entirely needs a re-verify.
+func TestIviStateShape(t *testing.T) {
+	const fragment = `{"abTest":{"state":{"ip":"159.195.6.55","exp":["A","B"]}}}`
+	p := JSONKey("ip")
+	got, err := p.Parse(nil, []byte(fragment))
+	if err != nil {
+		t.Fatalf("ivi parse: %v", err)
+	}
+	if got != "159.195.6.55" {
+		t.Errorf("got %q, want 159.195.6.55", got)
+	}
+}
+
 // TestCookieParser_LitresShape — snapshot of the DDoS-Guard cookie
 // pair that fronts litres.ru. The IP rides in `__ddg9_=<ip>`
 // alongside several sibling cookies (`__ddg8_`, `__ddg10_`,

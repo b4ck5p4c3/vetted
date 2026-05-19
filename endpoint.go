@@ -390,9 +390,73 @@ var DefaultEndpoints = []Endpoint{
 		Cost:   1770000,
 		Parser: JSONKey("remoteAddress"),
 	},
-	// avito removed: the landing page is ~1 MB and the requester
-	// IP sits at byte offset ~1.04 MB in the body — well past the
-	// Discoverer's 256 KB response cap. Bumping the cap just for
-	// avito would let any other misconfigured endpoint stream
-	// megabytes. Not worth the trade.
+	// avito skipped — re-verified from foreign egress with the
+	// MaxBytes field available. The landing returns HTTP 403 with a
+	// 27 KB antibot interstitial ("Доступ ограничен: проблема с
+	// IP") and no requester-IP echo anywhere in that body. The Range
+	// header (`bytes=1000000-1100000`) is also ignored — the server
+	// still returns the same 403 / 27 KB antibot body, not a 206
+	// slice of the real landing. Inside RU the IP reportedly sits
+	// at byte ~1.04 MB in the full landing; that variant is
+	// unmeasured from this environment. Two reasons to keep avito
+	// off the default list:
+	//   1. From foreign egress there is no IP to extract at all;
+	//   2. Setting MaxBytes to ~1.1 MB just for avito would download
+	//      a megabyte every cycle even when other cheaper endpoints
+	//      already succeeded (Cost-tier ordering only sorts within
+	//      a family — it doesn't skip an attempt that is already
+	//      eligible by Cost).
+	// Re-eligible if either the antibot variant starts echoing IP,
+	// or this library gains a "cancel within tier as soon as one
+	// wins" optimisation that makes a megabyte-class endpoint cheap
+	// when something else wins first.
+	{
+		// Live-verified: 748801 B body with a single
+		// `"ip":"159.195.6.55"` token at byte offset 266202. JSONKey
+		// matches because the body contains exactly one "ip" key
+		// (verified by grep on the full body). MaxBytes=300_000
+		// gives a ~33 KB margin above the IP position so a page
+		// reshuffle doesn't immediately break it; Cost matches
+		// MaxBytes because that is the byte volume we will actually
+		// pull when this endpoint runs.
+		Name:     "ivi",
+		URL:      "https://www.ivi.tv/",
+		Family:   Any,
+		Cost:     300_000,
+		Parser:   JSONKey("ip"),
+		MaxBytes: 300_000,
+	},
+	{
+		// Live-verified: POST {} to
+		// /api/v1/information/get returns 403 with the same VPN-
+		// detected shape lamoda-vpn-error uses
+		// (`{"code":10403,"data":{"ip":"<ip>"},"message":"...","title":"..."}`,
+		// 194 B). Plain GET 400s with "The method does not exists" —
+		// requires the new Method + Body wiring. AcceptStatus
+		// retained to opt the 403 past the 2xx gate.
+		Name:         "lamoda-information-get",
+		URL:          "https://www.lamoda.ru/api/v1/information/get",
+		Family:       Any,
+		Cost:         CostMinimal,
+		Method:       "POST",
+		Body:         []byte(`{}`),
+		Headers:      map[string]string{"Content-Type": "application/json"},
+		Parser:       JSONKey("ip"),
+		AcceptStatus: []int{200, 403},
+	},
+	{
+		// Live-verified: same shape and same body as
+		// lamoda-information-get above — POST {} → 403 with
+		// `data.ip` echoed. Kept as a sibling so a single API path
+		// flapping does not knock out the entire lamoda probe set.
+		Name:         "lamoda-topmenu-flexible",
+		URL:          "https://www.lamoda.ru/api/v1/cms/topmenu_flexible",
+		Family:       Any,
+		Cost:         CostMinimal,
+		Method:       "POST",
+		Body:         []byte(`{}`),
+		Headers:      map[string]string{"Content-Type": "application/json"},
+		Parser:       JSONKey("ip"),
+		AcceptStatus: []int{200, 403},
+	},
 }

@@ -82,16 +82,19 @@ API endpoints (`CostMinimal`, race in parallel):
 
 HTML landing pages (fall-through, Cost = measured body size in bytes):
 
-| Name               | URL                                            | Parser                     | Cost    | Notes                                                                                                                                                            |
-| ------------------ | ---------------------------------------------- | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| yandex-internet-v4 | `yandex.ru/internet/`                          | `Regex("v4":"...")`        | 114200  | v4 race only                                                                                                                                                     |
-| yandex-internet-v6 | `yandex.ru/internet/`                          | `Regex("v6":"...")`        | 114200  | v6 race only                                                                                                                                                     |
-| mail-speedtest     | `speedtest.mail.ru/`                           | `Regex("IP: ...")`         | 6900    | small landing                                                                                                                                                    |
-| wildberries        | `www.wildberries.ru/`                          | `HTMLAttr("data-req-ip")`  | 1600    | antibot variant from foreign IP; full landing larger inside RU (unmeasured)                                                                                      |
-| tbank              | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
-| litres             | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 256000  | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
-| lamoda-vpn-error   | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — opt-in via `AcceptStatus: [200, 403]`                                                                            |
-| 2gis-antibot       | `2gis.ru/`                                     | `Regex(REQUEST-IP IP:...)` | 1411    | 403 antibot landing echoes IP in `<p id="REQUEST-IP">`; `AcceptStatus: [200, 403]`                                                                               |
+| Name                    | URL                                            | Parser                     | Cost    | Notes                                                                                                                                                            |
+| ----------------------- | ---------------------------------------------- | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| yandex-internet-v4      | `yandex.ru/internet/`                          | `Regex("v4":"...")`        | 114200  | v4 race only                                                                                                                                                     |
+| yandex-internet-v6      | `yandex.ru/internet/`                          | `Regex("v6":"...")`        | 114200  | v6 race only                                                                                                                                                     |
+| mail-speedtest          | `speedtest.mail.ru/`                           | `Regex("IP: ...")`         | 6900    | small landing                                                                                                                                                    |
+| wildberries             | `www.wildberries.ru/`                          | `HTMLAttr("data-req-ip")`  | 1600    | antibot variant from foreign IP; full landing larger inside RU (unmeasured)                                                                                      |
+| ivi                     | `www.ivi.tv/`                                  | `JSONKey("ip")`            | 300000  | 748 KB landing; single `"ip":"..."` at byte ~266 K — `MaxBytes: 300_000` to reach it                                                                             |
+| tbank                   | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
+| litres                  | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 256000  | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
+| lamoda-vpn-error        | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — opt-in via `AcceptStatus: [200, 403]`                                                                            |
+| lamoda-information-get  | `www.lamoda.ru/api/v1/information/get`         | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; needs `Method: "POST"` + `Body: []byte("{}")`                                                                            |
+| lamoda-topmenu-flexible | `www.lamoda.ru/api/v1/cms/topmenu_flexible`    | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; sibling probe to lamoda-information-get                                                                                  |
+| 2gis-antibot            | `2gis.ru/`                                     | `Regex(REQUEST-IP IP:...)` | 1411    | 403 antibot landing echoes IP in `<p id="REQUEST-IP">`; `AcceptStatus: [200, 403]`                                                                               |
 
 Removed during verification:
 
@@ -100,26 +103,28 @@ Removed during verification:
   hit and expects a JS-set companion cookie before answering with
   the geo JSON. Stateless clients (curl, surf without a cookie jar
   - JS engine) loop forever. Not viable as a stateless probe.
-- **avito** (`www.avito.ru/`) — from foreign egress returns a 27 KB
-  antibot page (`Доступ ограничен: проблема с IP`) with no IP
-  echoed; from inside RU the IP is reported to sit ~1 MB into the
-  landing, past the 256 KB response cap. Either way not workable
-  from this environment.
-- **ivi.tv** (`www.ivi.tv/`) — 731 KB landing with the IP at byte
-  266502 (`"ip":"..."` inside an ABTest state block). 4 KB past the
-  256 KB cap; one occurrence in the body so a higher per-endpoint
-  cap is the only way to keep it. Skipped for now.
-- **lamoda /information/get + /cms/topmenu_flexible** — 400 errors
-  with 65 B bodies that don't echo the IP. Only the
-  `/recommendations/section` endpoint of the lamoda API echoes IP in
-  its 403 body (kept as `lamoda-vpn-error`).
+- **avito** (`www.avito.ru/`) — re-verified from foreign egress
+  with the new `MaxBytes` field available. The landing returns HTTP
+  403 with a 27 KB antibot interstitial ("Доступ ограничен: проблема
+  с IP") and no requester-IP echo anywhere in that body. The Range
+  header (`bytes=1000000-1100000`) is ignored — the server still
+  returns the same 403 / 27 KB antibot body, not a 206 slice of the
+  real landing. Inside RU the IP reportedly sits at byte ~1.04 MB in
+  the full landing; that variant is unmeasured (foreign egress).
+  Even if MaxBytes could be set to ~1.1 MB just for avito, that's a
+  megabyte every cycle even when cheaper endpoints already win the
+  race — not worth the bandwidth trade.
 
 ## Status
 
-All TODO-tagged endpoints have been live-verified; parsers and
-costs above reflect measured body shape and size. Two endpoints
-(alfabank, avito) were removed during verification — see the
-"Removed during verification" section above.
+All listed endpoints have been live-verified; parsers and costs
+above reflect measured body shape and size. Two endpoints
+(alfabank, avito) stay removed for the reasons documented in
+"Removed during verification". The three endpoints originally
+parked for follow-up (ivi, lamoda /information/get, lamoda
+/cms/topmenu_flexible) were re-verified with the new per-endpoint
+`MaxBytes` / `Method` / `Body` plumbing and have been added back to
+the default set.
 
 ## License
 
