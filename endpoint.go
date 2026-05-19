@@ -120,14 +120,14 @@ var DefaultEndpoints = []Endpoint{
 		Parser:  JSONKey("ip"),
 	},
 	{
+		// Live-verified: returns `{"ip":"..."}` (21 bytes) with the
+		// same /api/asn_provider/ip shape as qms.
 		Name:    "rt-speedtest",
 		URL:     "https://speedtest.rt.ru/api/asn_provider/ip",
 		Family:  Any,
 		Cost:    CostMinimal,
 		Headers: map[string]string{"X-Api-Key": "f85f12b942ab0a8818eb66d64b244ee5"},
-		// Same /api/asn_provider/ip pattern as qms; almost certainly
-		// the same {"ip":"..."} shape. TODO(agent): live-verify.
-		Parser: JSONKey("ip"),
+		Parser:  JSONKey("ip"),
 	},
 	{
 		Name:   "ipinfo",
@@ -138,24 +138,19 @@ var DefaultEndpoints = []Endpoint{
 		Parser: JSONKey("ip"),
 	},
 	{
-		// TODO(agent): live-check. URL says detect_ip_info — likely
-		// {"ip":"...","country":"...",...}. Verify shape.
+		// Live-verified: `{"ip":"...","success":true}` (37 bytes).
 		Name:   "reg-speedtest",
 		URL:    "https://speedtest.reg.ru/detect_ip_info",
 		Family: Any,
 		Cost:   CostMinimal,
 		Parser: JSONKey("ip"),
 	},
-	{
-		// TODO(agent): live-check. Alfabank geo facade probably
-		// returns {"ip":"...","country":"...","city":"..."} or
-		// wrapped {"data":{"ip":"..."}}. Confirm key path.
-		Name:   "alfabank",
-		URL:    "https://alfabank.ru/api/v2/geo-facade/geo/ip?detect_ip=true",
-		Family: Any,
-		Cost:   CostMinimal,
-		Parser: JSONKey("ip"),
-	},
+	// alfabank removed: /api/v2/geo-facade/geo/ip 307-redirects to
+	// itself with `set-cookie: spid=...` for any request that doesn't
+	// already carry the antibot cookie pair, producing an infinite
+	// redirect loop on a stateless client. Even with cookie jar
+	// wiring the upstream insists on a JS-set companion cookie that
+	// curl / surf can't synthesise. Not viable as a stateless probe.
 	{
 		Name:   "yandex-v4",
 		URL:    "https://ipv4-internet.yandex.net/api/v0/ip",
@@ -171,69 +166,84 @@ var DefaultEndpoints = []Endpoint{
 		Parser: JSONQuoted(),
 	},
 	{
-		// TODO(agent): live-check. ip.mail.ru/ip.html is HTML but
-		// typically tiny — just a page showing the IP. Find the
-		// markup pattern (likely `<p>1.2.3.4</p>` or
-		// `<span ...>1.2.3.4</span>`). Measure body size; if it
-		// really is <500 bytes, keep at CostMinimal, otherwise
-		// bump to the measured value.
+		// Live-verified: JSONP-shaped body
+		// `(none)({"ipAddress": "...", "xForwardedFor": "(none)"})`
+		// — 65 bytes. JSONKey("ipAddress") matches inside the
+		// JSONP wrapper just like a plain JSON object.
 		Name:   "mail-ip",
 		URL:    "https://ip.mail.ru/ip.html",
 		Family: Any,
 		Cost:   CostMinimal,
-		// Regex placeholder; the actual pattern depends on markup.
-		Parser: Regex(`\b((?:\d{1,3}\.){3}\d{1,3})\b`),
+		Parser: JSONKey("ipAddress"),
 	},
 
 	// ── HTML landing pages — Cost = measured body size in bytes ──
 	{
-		// TODO(agent): live-check. yandex.ru/internet/ embeds JSON
-		// state in HTML; earlier observation showed `"ip":"..."`
-		// somewhere in the body (and also `"ip":"<city name>"` —
-		// generic JSONKey("ip") will pick the first which may not
-		// be the right one). Verify the order and write a tighter
-		// parser if needed. Measure body size for Cost.
-		Name:   "yandex-internet",
+		// Live-verified at ~114 KB. The page embeds state JSON
+		// containing two relevant keys: `"ip":"Нюрнберг"` (a CITY
+		// name, leftover from a different schema branch) and
+		// `"v4":"159.195.6.55"` (the actual IP, nested inside
+		// `"ip":{"v4":...,"v6":null}`). We parse `"v4"` for the V4
+		// race and split out a separate V6 entry below.
+		Name:   "yandex-internet-v4",
 		URL:    "https://yandex.ru/internet/",
-		Family: Any,
-		Cost:   CostMedium, // TODO: replace with measured byte count
-		Parser: Regex(`"ip"\s*:\s*"((?:\d{1,3}\.){3}\d{1,3})"`),
+		Family: V4,
+		Cost:   114200,
+		Parser: Regex(`"v4"\s*:\s*"((?:\d{1,3}\.){3}\d{1,3})"`),
 	},
 	{
-		// TODO(agent): live-check + measure. speedtest.mail.ru/ is
-		// a landing page; find the IP in the markup and write the
-		// matching parser.
+		// Same page; V6 race parses the `"v6":"..."` key from the
+		// same state JSON. v6 is `null` on v4-only egress, so this
+		// parser fails cleanly there.
+		Name:   "yandex-internet-v6",
+		URL:    "https://yandex.ru/internet/",
+		Family: V6,
+		Cost:   114200,
+		Parser: Regex(`"v6"\s*:\s*"([0-9a-fA-F:]+)"`),
+	},
+	{
+		// Live-verified at ~6.9 KB. The IP is in a small markup
+		// fragment `<p>IP: 1.2.3.4</p>` — match the literal prefix
+		// to avoid catching the unrelated `120.0.0.0` user-agent
+		// version that also appears in the page.
 		Name:   "mail-speedtest",
 		URL:    "https://speedtest.mail.ru/",
 		Family: Any,
-		Cost:   CostMedium, // TODO: measured byte count
-		Parser: Regex(`"ip"\s*:\s*"([^"]+)"`),
+		Cost:   6900,
+		Parser: Regex(`IP:\s*((?:\d{1,3}\.){3}\d{1,3})`),
 	},
 	{
+		// Live-verified: wildberries returns a small antibot-style
+		// landing (~1.6 KB on foreign egress, larger inside RU) and
+		// the requester IP sits in `data-req-ip="..."` on the root
+		// <html> element. From foreign IPs the page comes back HTTP
+		// 451 (Unavailable For Legal Reasons) so the discoverer
+		// rejects it; from inside the RU segment it returns 200.
+		// Cost measured on the antibot variant — full landing
+		// inside RU is unmeasured from this environment.
 		Name:   "wildberries",
 		URL:    "https://www.wildberries.ru/",
 		Family: Any,
-		Cost:   CostHigh, // ~3 KB antibot landing in practice
+		Cost:   1600,
 		Parser: HTMLAttr("data-req-ip"),
 	},
 	{
-		// TODO(agent): live-check + measure. tbank.ru is a landing
-		// page; need to find where the IP appears (Cloudfront echo,
-		// embedded JSON, etc.).
+		// Live-verified at ~1.77 MB. The IP appears in a JSON
+		// island as `"remoteAddress":"..."` at byte ~255200 — just
+		// inside the Discoverer's 256 KB response cap. Fragile: a
+		// page reorganisation that pushes the island past 256 KB
+		// will silently break this endpoint (parser_miss). Kept
+		// because no cheaper alternative answers from inside RU
+		// for this domain.
 		Name:   "tbank",
 		URL:    "https://www.tbank.ru",
 		Family: Any,
-		Cost:   CostHigh, // TODO: measured byte count
-		Parser: Regex(`"ip"\s*:\s*"([^"]+)"`),
+		Cost:   1770000,
+		Parser: JSONKey("remoteAddress"),
 	},
-	{
-		// TODO(agent): live-check + measure. avito.ru landing
-		// historically embeds the requester IP in a JSON island in
-		// the HTML; confirm shape.
-		Name:   "avito",
-		URL:    "https://www.avito.ru/",
-		Family: Any,
-		Cost:   CostHigh, // TODO: measured byte count
-		Parser: Regex(`"ip"\s*:\s*"([^"]+)"`),
-	},
+	// avito removed: the landing page is ~1 MB and the requester
+	// IP sits at byte offset ~1.04 MB in the body — well past the
+	// Discoverer's 256 KB response cap. Bumping the cap just for
+	// avito would let any other misconfigured endpoint stream
+	// megabytes. Not worth the trade.
 }
