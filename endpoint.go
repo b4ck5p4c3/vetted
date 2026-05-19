@@ -355,6 +355,23 @@ var DefaultEndpoints = []Endpoint{
 		// (194 B) on requests from VPN / non-RU IPs — the IP is
 		// echoed back as part of the "VPN detected" payload.
 		// Requires AcceptStatus to opt past the 2xx gate.
+		//
+		// EGRESS-DIRECTION CAVEAT (applies to every lamoda-* probe
+		// in this list). The 403-with-IP payload only fires when
+		// lamoda's antibot classifies the caller's egress IP as
+		// VPN / suspect / foreign. From a "trusted" domestic RU IP
+		// the same URL responds HTTP 307 with a cookie-set
+		// redirect that loops indefinitely — never reaches 200
+		// nor 403, and the response body is a literal "blank\n"
+		// (5 B) with no IP payload. Net effect: lamoda-* probes
+		// SUCCEED for callers running this library behind a VPN
+		// (or on a non-RU host probing into RU) and SILENTLY
+		// FAIL for callers running on a domestic RU host. They
+		// stay in the default set because the failure is graceful
+		// — the discoverer just records a non-matching FailReason
+		// and falls through to the next endpoint — but operators
+		// should not expect lamoda hits in their span tags from
+		// in-country deployments.
 		Name:         "lamoda-vpn-error",
 		URL:          "https://www.lamoda.ru/api/v1/recommendations/section",
 		Family:       Any,
@@ -390,22 +407,26 @@ var DefaultEndpoints = []Endpoint{
 		Cost:   1770000,
 		Parser: JSONKey("remoteAddress"),
 	},
-	// avito skipped — re-verified from foreign egress with the
-	// MaxBytes field available. The landing returns HTTP 403 with a
-	// 27 KB antibot interstitial ("Доступ ограничен: проблема с
-	// IP") and no requester-IP echo anywhere in that body. The Range
-	// header (`bytes=1000000-1100000`) is also ignored — the server
-	// still returns the same 403 / 27 KB antibot body, not a 206
-	// slice of the real landing. Inside RU the IP reportedly sits
-	// at byte ~1.04 MB in the full landing; that variant is
-	// unmeasured from this environment. Two reasons to keep avito
-	// off the default list:
+	// avito skipped — re-verified from both foreign and domestic-RU
+	// egress with the MaxBytes field available. Foreign egress: HTTP
+	// 403 with a 27 KB antibot interstitial ("Доступ ограничен:
+	// проблема с IP") and no requester-IP echo anywhere in that
+	// body. Domestic RU egress: HTTP 200 with a 985 KB landing that
+	// embeds the requester IP three times as `"ip":"<addr>"` at byte
+	// offsets ~957916 / ~958670 / ~959682. The Range header
+	// (`bytes=1000000-1100000`) is ignored in both cases — foreign
+	// egress still returns the 27 KB 403, and domestic egress
+	// returns HTTP 200 with the full ~1.16 MB body (not a 206
+	// slice). So MaxBytes-only-for-the-relevant-window does not
+	// work; the only way to read the IP is to download the full
+	// landing on every cycle. Two reasons to keep avito off the
+	// default list:
 	//   1. From foreign egress there is no IP to extract at all;
-	//   2. Setting MaxBytes to ~1.1 MB just for avito would download
-	//      a megabyte every cycle even when other cheaper endpoints
-	//      already succeeded (Cost-tier ordering only sorts within
-	//      a family — it doesn't skip an attempt that is already
-	//      eligible by Cost).
+	//   2. Setting MaxBytes to ~1_000_000 just for avito would
+	//      download a megabyte every cycle even when other cheaper
+	//      endpoints already succeeded (Cost-tier ordering only
+	//      sorts within a family — it doesn't skip an attempt that
+	//      is already eligible by Cost).
 	// Re-eligible if either the antibot variant starts echoing IP,
 	// or this library gains a "cancel within tier as soon as one
 	// wins" optimisation that makes a megabyte-class endpoint cheap
@@ -434,6 +455,12 @@ var DefaultEndpoints = []Endpoint{
 		// 194 B). Plain GET 400s with "The method does not exists" —
 		// requires the new Method + Body wiring. AcceptStatus
 		// retained to opt the 403 past the 2xx gate.
+		//
+		// Same EGRESS-DIRECTION CAVEAT as lamoda-vpn-error above:
+		// the IP-bearing 403 only fires from VPN / foreign egress;
+		// from a domestic RU IP the same URL responds HTTP 307
+		// "blank\n" indefinitely. See that endpoint's comment for
+		// the full explanation.
 		Name:         "lamoda-information-get",
 		URL:          "https://www.lamoda.ru/api/v1/information/get",
 		Family:       Any,
@@ -449,6 +476,7 @@ var DefaultEndpoints = []Endpoint{
 		// lamoda-information-get above — POST {} → 403 with
 		// `data.ip` echoed. Kept as a sibling so a single API path
 		// flapping does not knock out the entire lamoda probe set.
+		// Same EGRESS-DIRECTION CAVEAT applies; see lamoda-vpn-error.
 		Name:         "lamoda-topmenu-flexible",
 		URL:          "https://www.lamoda.ru/api/v1/cms/topmenu_flexible",
 		Family:       Any,

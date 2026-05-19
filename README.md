@@ -91,9 +91,9 @@ HTML landing pages (fall-through, Cost = measured body size in bytes):
 | ivi                     | `www.ivi.tv/`                                  | `JSONKey("ip")`            | 300000  | 748 KB landing; single `"ip":"..."` at byte ~266 K — `MaxBytes: 300_000` to reach it                                                                             |
 | tbank                   | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
 | litres                  | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 256000  | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
-| lamoda-vpn-error        | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — opt-in via `AcceptStatus: [200, 403]`                                                                            |
-| lamoda-information-get  | `www.lamoda.ru/api/v1/information/get`         | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; needs `Method: "POST"` + `Body: []byte("{}")`                                                                            |
-| lamoda-topmenu-flexible | `www.lamoda.ru/api/v1/cms/topmenu_flexible`    | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; sibling probe to lamoda-information-get                                                                                  |
+| lamoda-vpn-error        | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — `AcceptStatus: [200, 403]`. Foreign/VPN egress only — 307-loops from domestic RU IPs                             |
+| lamoda-information-get  | `www.lamoda.ru/api/v1/information/get`         | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; needs `Method: "POST"` + `Body: []byte("{}")`. Same egress-direction caveat as lamoda-vpn-error                          |
+| lamoda-topmenu-flexible | `www.lamoda.ru/api/v1/cms/topmenu_flexible`    | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; sibling probe. Same egress-direction caveat as lamoda-vpn-error                                                          |
 | 2gis-antibot            | `2gis.ru/`                                     | `Regex(REQUEST-IP IP:...)` | 1411    | 403 antibot landing echoes IP in `<p id="REQUEST-IP">`; `AcceptStatus: [200, 403]`                                                                               |
 
 Removed during verification:
@@ -103,17 +103,19 @@ Removed during verification:
   hit and expects a JS-set companion cookie before answering with
   the geo JSON. Stateless clients (curl, surf without a cookie jar
   - JS engine) loop forever. Not viable as a stateless probe.
-- **avito** (`www.avito.ru/`) — re-verified from foreign egress
-  with the new `MaxBytes` field available. The landing returns HTTP
-  403 with a 27 KB antibot interstitial ("Доступ ограничен: проблема
-  с IP") and no requester-IP echo anywhere in that body. The Range
-  header (`bytes=1000000-1100000`) is ignored — the server still
-  returns the same 403 / 27 KB antibot body, not a 206 slice of the
-  real landing. Inside RU the IP reportedly sits at byte ~1.04 MB in
-  the full landing; that variant is unmeasured (foreign egress).
-  Even if MaxBytes could be set to ~1.1 MB just for avito, that's a
-  megabyte every cycle even when cheaper endpoints already win the
-  race — not worth the bandwidth trade.
+- **avito** (`www.avito.ru/`) — re-verified from both foreign and
+  domestic-RU egress with the new `MaxBytes` field available.
+  Foreign egress: HTTP 403 with a 27 KB antibot interstitial
+  ("Доступ ограничен: проблема с IP") and no requester-IP echo
+  anywhere. Domestic RU egress: HTTP 200 with a 985 KB landing that
+  embeds the IP three times as `"ip":"..."` near byte offset ~958 K.
+  The Range header (`bytes=1000000-1100000`) is ignored in both
+  cases — foreign egress still returns the 27 KB 403, and domestic
+  egress returns the full ~1.16 MB body (HTTP 200, not 206). So
+  the only way to read the IP is to download the full landing on
+  every cycle. Even with `MaxBytes` set to ~1_000_000 just for
+  avito, that's a megabyte every cycle even when cheaper endpoints
+  already win the race — not worth the bandwidth trade.
 
 ## Status
 
