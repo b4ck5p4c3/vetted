@@ -76,6 +76,7 @@ API endpoints (`CostMinimal`, race in parallel):
 | ipinfo           | `ipinfo.io/json`                      | `JSONKey("ip")`        | full geo JSON                     |
 | reg-speedtest    | `speedtest.reg.ru/detect_ip_info`     | `JSONKey("ip")`        | `{"ip":"...","success":true}`     |
 | start-proxycheck | `api.start.ru/account/proxycheck`     | `JSONKey("ip")`        | apikey query param baked into URL |
+| alfabank         | `alfabank.ru/api/v2/geo-facade/geo/ip`| `Regex(IP X.X.X.X)`    | 404 JSON `"по IP <ip> нет информации"` (Russian message); ServicePipe one-hop 307+cookie antibot; `AcceptStatus: [200, 404]`; needs HTML `Accept` header |
 | yandex-v4        | `ipv4-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v4-only host                      |
 | yandex-v6        | `ipv6-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v6-only host                      |
 | mail-ip          | `ip.mail.ru/ip.html`                  | `JSONKey("ipAddress")` | JSONP wrapper                     |
@@ -99,24 +100,28 @@ HTML landing pages (fall-through, Cost = measured body size in bytes):
 
 Removed during verification:
 
-- **alfabank** (`alfabank.ru/api/v2/geo-facade/geo/ip`) — 307s to
-  itself with a `set-cookie: spid=...` antibot cookie pair on every
-  hit and expects a JS-set companion cookie before answering with
-  the geo JSON. Stateless clients (curl, surf without a cookie jar
-  - JS engine) loop forever. Not viable as a stateless probe.
+- **alfabank `/api/v2/geo-facade/geo/ip?detect_ip=true`** — the
+  detect_ip variant 307s into a JS-cookie flow that stateless clients
+  cannot complete. Even with a cookie jar the upstream insists on a
+  JS-set companion cookie that curl / surf can't synthesise. The
+  bare path (no `detect_ip=true` query) does NOT exhibit this
+  behaviour — it is the one-hop ServicePipe replay covered by the
+  `alfabank` entry above. Earlier removal commentary applied to the
+  detect_ip variant only.
 
 ## Status
 
 All listed endpoints have been live-verified; parsers and costs
-above reflect measured body shape and size. One endpoint (alfabank)
-stays removed for the reason documented in "Removed during
-verification". The four endpoints originally parked for follow-up
-(avito, ivi, lamoda /information/get, lamoda /cms/topmenu_flexible)
-were re-verified with the new per-endpoint `MaxBytes` / `Method` /
-`Body` plumbing and have been added back to the default set. avito
-in particular carries an honest `Cost: 1_000_000` so callers who
-cannot afford a megabyte per cycle drop it with
-`WithMaxCost(CostMedium)` or similar.
+above reflect measured body shape and size. The four endpoints
+originally parked for follow-up (avito, ivi, lamoda /information/get,
+lamoda /cms/topmenu_flexible) were re-verified with the new
+per-endpoint `MaxBytes` / `Method` / `Body` plumbing and have been
+added back to the default set. avito in particular carries an honest
+`Cost: 1_000_000` so callers who cannot afford a megabyte per cycle
+drop it with `WithMaxCost(CostMedium)` or similar. alfabank was
+re-verified after the initial removal: the bare path (no
+`?detect_ip=true`) does a clean one-hop ServicePipe replay and
+echoes the IP in a 404 JSON message, so it is back in the API tier.
 
 ## License
 

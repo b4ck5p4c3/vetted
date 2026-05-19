@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -672,6 +673,58 @@ func TestAttempt_DefaultsGETWithNilBody(t *testing.T) {
 	}
 	if bodyLen.Load() != 0 {
 		t.Errorf("default Body length = %d, want 0", bodyLen.Load())
+	}
+}
+
+// TestAttempt_FollowsRedirectWithCookieJar simulates the alfabank
+// shape: first request answers 307 + Set-Cookie (antibot challenge),
+// second request (replayed with cookies) answers 404 + body
+// containing the IP. Locks in the structural property the alfabank
+// endpoint depends on: the family-pinned HTTP client must follow
+// the redirect AND carry forward the cookies so the second hop
+// reaches the IP-bearing response.
+func TestAttempt_FollowsRedirectWithCookieJar(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if _, err := r.Cookie("spid"); err != nil {
+			http.SetCookie(w, &http.Cookie{Name: "spid", Value: "abc", Path: "/"})
+			http.SetCookie(w, &http.Cookie{Name: "spsc", Value: "def", Path: "/"})
+			w.Header().Set("Location", r.URL.String())
+			w.WriteHeader(http.StatusTemporaryRedirect)
+			fmt.Fprint(w, "blank\n")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"status":"NOT_FOUND","message":"Город не найден, т.к по IP 203.0.113.7 нет информации в системе"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := srv.Client()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("cookiejar.New: %v", err)
+	}
+	client.Jar = jar
+
+	d := New(
+		WithEndpoints(Endpoint{
+			Name: "alfa-shape", URL: srv.URL,
+			Family: Any, Cost: CostMinimal,
+			AcceptStatus: []int{200, 404},
+			Parser:       Regex(`IP\s+((?:\d{1,3}\.){3}\d{1,3})`),
+		}),
+		WithHTTPClient(V4, client),
+		WithHTTPClient(V6, client),
+		WithTimeout(3*time.Second),
+	)
+	res := d.Discover(t.Context())
+	if res.V4 == nil || res.V4.String() != "203.0.113.7" {
+		t.Fatalf("V4 = %v, want 203.0.113.7 (err: %v)", res.V4, res.V4Err)
+	}
+	if got := hits.Load(); got < 2 {
+		t.Errorf("server hits = %d, want >= 2 (antibot 307 + 404 replay)", got)
 	}
 }
 

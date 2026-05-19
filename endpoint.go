@@ -249,12 +249,39 @@ var DefaultEndpoints = []Endpoint{
 		Cost:   CostMinimal,
 		Parser: JSONKey("ip"),
 	},
-	// alfabank removed: /api/v2/geo-facade/geo/ip 307-redirects to
-	// itself with `set-cookie: spid=...` for any request that doesn't
-	// already carry the antibot cookie pair, producing an infinite
-	// redirect loop on a stateless client. Even with cookie jar
-	// wiring the upstream insists on a JS-set companion cookie that
-	// curl / surf can't synthesise. Not viable as a stateless probe.
+	{
+		// Live-verified: /api/v2/geo-facade/geo/ip returns HTTP 404
+		// with `{"status":"NOT_FOUND","message":"Город не найден,
+		// т.к по IP <ip> нет информации в системе"}` (137 B). The
+		// IP is echoed verbatim in the Russian message as the
+		// rejection reason for "no geo data for this address".
+		//
+		// Antibot dance is a one-hop ServicePipe replay: the first
+		// request gets HTTP 307 to the same URL with a `set-cookie:
+		// spid=...; spsc=...` pair; the surf client's Session()
+		// cookie jar replays with the cookies and the second hop
+		// answers 404 + body. Round trip ~1-3s end-to-end which
+		// loses the race against sub-second API endpoints but pulls
+		// through as a backstop when the cheap tier is blocked.
+		//
+		// Earlier removal commentary in this file documented an
+		// "infinite redirect loop" — that was the
+		// `?detect_ip=true` variant, which 307s into a different
+		// JS-cookie flow. The bare path (no query) is a clean
+		// one-hop replay. AcceptStatus opts the 404 past the 2xx
+		// gate; the matching Accept header keeps ServicePipe on
+		// the HTML-replay branch rather than serving the JSON
+		// "406 Not Acceptable" path.
+		Name:   "alfabank",
+		URL:    "https://alfabank.ru/api/v2/geo-facade/geo/ip",
+		Family: Any,
+		Cost:   CostMinimal,
+		Headers: map[string]string{
+			"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		},
+		AcceptStatus: []int{200, 404},
+		Parser:       Regex(`IP\s+((?:\d{1,3}\.){3}\d{1,3})`),
+	},
 	{
 		Name:   "yandex-v4",
 		URL:    "https://ipv4-internet.yandex.net/api/v0/ip",
