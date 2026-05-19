@@ -8,12 +8,6 @@ marketplaces, search engines) that the network filter actively
 wants reachable — so they remain useful probes inside the RU
 segment when generic providers do not.
 
-## Status
-
-Scaffolded. Half the default endpoints are TODO-tagged for live
-verification of (a) response parser and (b) measured byte cost.
-Open `endpoint.go` for the list.
-
 ## Usage
 
 ```go
@@ -47,8 +41,8 @@ res := d.Latest()
 - **Cost-based selection.** Each `Endpoint` carries a `Cost`
   approximating its response size in bytes. Endpoints with equal
   Cost race in parallel within one tier; tiers are tried
-  cheap-first sequentially. HTML landing pages (50KB+) only get
-  hit when every cheap API has failed.
+  cheap-first sequentially. HTML landing pages only get hit when
+  every cheap API has failed.
 - **V4 + V6 in parallel.** Two dialer-pinned HTTP clients run
   independent races per family. A v4 result and v6 result land
   on the scope as separate values; either or both may be unset
@@ -56,8 +50,8 @@ res := d.Latest()
 - **Browser fingerprint.** Default HTTP clients use
   [enetx/surf](https://github.com/enetx/surf) with Chrome
   Impersonate — JA3/JA4 TLS fingerprint + matching User-Agent.
-  Necessary for the HTML landing pages (wildberries, tbank,
-  avito) that would otherwise return an antibot interstitial.
+  Necessary for the HTML landing pages (wildberries, tbank) that
+  would otherwise return an antibot interstitial.
 - **Pluggable tracer.** `Tracer` is a small interface
   (CycleStart/End, AttemptStart/End) with a `NoopTracer` default.
   Sentry / OpenTelemetry adapters live in the calling code, not
@@ -73,28 +67,46 @@ host fails fast — which is the correct "no v6 here" signal.
 
 ## Default endpoints
 
-API (race in parallel, `CostMinimal`):
+API endpoints (`CostMinimal`, race in parallel):
 
-| Name | URL | Notes |
-|---|---|---|
-| qms | `www.qms.ru/api/asn_provider/ip` | `X-Api-Key` header |
-| rt-speedtest | `speedtest.rt.ru/api/asn_provider/ip` | `X-Api-Key` header |
-| ipinfo | `ipinfo.io/json` | full geo JSON |
-| reg-speedtest | `speedtest.reg.ru/detect_ip_info` | TODO verify shape |
-| alfabank | `alfabank.ru/api/v2/geo-facade/geo/ip` | TODO verify shape |
-| yandex-v4 | `ipv4-internet.yandex.net/api/v0/ip` | v4-only host |
-| yandex-v6 | `ipv6-internet.yandex.net/api/v0/ip` | v6-only host |
-| mail-ip | `ip.mail.ru/ip.html` | tiny HTML; TODO verify markup |
+| Name | URL | Parser | Notes |
+|---|---|---|---|
+| qms | `www.qms.ru/api/asn_provider/ip` | `JSONKey("ip")` | `X-Api-Key` header |
+| rt-speedtest | `speedtest.rt.ru/api/asn_provider/ip` | `JSONKey("ip")` | `X-Api-Key` header |
+| ipinfo | `ipinfo.io/json` | `JSONKey("ip")` | full geo JSON |
+| reg-speedtest | `speedtest.reg.ru/detect_ip_info` | `JSONKey("ip")` | `{"ip":"...","success":true}` |
+| yandex-v4 | `ipv4-internet.yandex.net/api/v0/ip` | `JSONQuoted()` | v4-only host |
+| yandex-v6 | `ipv6-internet.yandex.net/api/v0/ip` | `JSONQuoted()` | v6-only host |
+| mail-ip | `ip.mail.ru/ip.html` | `JSONKey("ipAddress")` | JSONP wrapper |
 
-HTML landing pages (fall-through tiers, Cost = measured size):
+HTML landing pages (fall-through, Cost = measured body size in bytes):
 
-| Name | URL | Notes |
-|---|---|---|
-| yandex-internet | `yandex.ru/internet/` | embeds IP in JSON state |
-| mail-speedtest | `speedtest.mail.ru/` | TODO live-check |
-| wildberries | `wildberries.ru/` | `data-req-ip` attribute |
-| tbank | `tbank.ru` | TODO live-check |
-| avito | `avito.ru/` | TODO live-check |
+| Name | URL | Parser | Cost | Notes |
+|---|---|---|---|---|
+| yandex-internet-v4 | `yandex.ru/internet/` | `Regex("v4":"...")` | 114200 | v4 race only |
+| yandex-internet-v6 | `yandex.ru/internet/` | `Regex("v6":"...")` | 114200 | v6 race only |
+| mail-speedtest | `speedtest.mail.ru/` | `Regex("IP: ...")` | 6900 | small landing |
+| wildberries | `www.wildberries.ru/` | `HTMLAttr("data-req-ip")` | 1600 | antibot variant from foreign IP; full landing larger inside RU (unmeasured) |
+| tbank | `www.tbank.ru` | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap |
+
+Removed during verification:
+
+- **alfabank** (`alfabank.ru/api/v2/geo-facade/geo/ip`) — 307s to
+  itself with a `set-cookie: spid=...` antibot cookie pair on every
+  hit and expects a JS-set companion cookie before answering with
+  the geo JSON. Stateless clients (curl, surf without a cookie jar
+  + JS engine) loop forever. Not viable as a stateless probe.
+- **avito** (`www.avito.ru/`) — landing page is ~1 MB and the
+  requester IP sits at byte ~1.04 MB, well past the Discoverer's
+  256 KB response cap. Bumping the cap globally for one endpoint
+  was the wrong trade.
+
+## Status
+
+All TODO-tagged endpoints have been live-verified; parsers and
+costs above reflect measured body shape and size. Two endpoints
+(alfabank, avito) were removed during verification — see the
+"Removed during verification" section above.
 
 ## License
 
