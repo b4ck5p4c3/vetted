@@ -2,6 +2,19 @@ package vetted
 
 import "fmt"
 
+// knownMethods is the allowlist for Endpoint.Method validation.
+// Anything outside this set (or empty) is rejected by Validate so a
+// typo doesn't silently turn into a GET in attempt().
+var knownMethods = map[string]struct{}{
+	"GET":     {},
+	"POST":    {},
+	"PUT":     {},
+	"PATCH":   {},
+	"DELETE":  {},
+	"HEAD":    {},
+	"OPTIONS": {},
+}
+
 // Family is the IP version an endpoint can answer for. A v4-only
 // hostname (A record only, like ipv4-internet.yandex.net) is V4;
 // a v6-only hostname is V6; dual-stack DNS that works for either
@@ -71,6 +84,55 @@ type Endpoint struct {
 	// "happy path" 200 page (which is huge and may not embed the
 	// IP at all from foreign egress).
 	AcceptStatus []int
+
+	// Method overrides the HTTP verb. Empty defaults to "GET".
+	// Must be one of GET / POST / PUT / PATCH / DELETE / HEAD /
+	// OPTIONS — Validate rejects anything else so a typo doesn't
+	// silently fall back to GET. Used for JSON-POST APIs like
+	// lamoda's that return 400 to a plain GET but echo the
+	// requester IP for an empty `{}` POST body.
+	Method string
+
+	// Body is the request body. Nil → no body (the default).
+	// Used alongside Method == "POST" / "PUT" / "PATCH". The
+	// Discoverer reads from a fresh bytes.Reader on every attempt
+	// so this slice is safe to share between cycles; treat it as
+	// immutable from the caller side once the Endpoint is handed
+	// to New().
+	Body []byte
+
+	// MaxBytes overrides the package-default 256 KB response cap
+	// for this endpoint specifically. Zero (the default) means
+	// "use the package default". Non-zero values may be larger
+	// OR smaller than the package default — the response is
+	// capped at MaxBytes verbatim, never widened back to the
+	// package default. Used for endpoints whose IP echo sits past
+	// 256 KB in a multi-hundred-KB landing page (ivi.tv at byte
+	// ~266 KB, etc.); pay the bandwidth so the parser actually
+	// sees the IP. Set Cost to the same value as MaxBytes so the
+	// tier ordering reflects the bytes you will actually pull.
+	MaxBytes int
+}
+
+// method returns the HTTP verb to use for this endpoint, defaulting
+// to GET when Method is empty. Centralised so attempt() doesn't
+// repeat the default-string check inline.
+func (e Endpoint) method() string {
+	if e.Method == "" {
+		return "GET"
+	}
+	return e.Method
+}
+
+// readCap returns the byte cap to apply to this endpoint's response
+// body. MaxBytes wins when set; otherwise the package default
+// applies. Centralised so the cap-selection rule lives next to the
+// field documentation.
+func (e Endpoint) readCap() int64 {
+	if e.MaxBytes > 0 {
+		return int64(e.MaxBytes)
+	}
+	return int64(maxResponseBytes)
 }
 
 // acceptStatus returns true if the response code is in this
@@ -104,6 +166,14 @@ func (e Endpoint) Validate() error {
 	}
 	if e.Cost <= 0 {
 		return fmt.Errorf("vetted: endpoint %q has non-positive Cost %d", e.Name, e.Cost)
+	}
+	if e.Method != "" {
+		if _, ok := knownMethods[e.Method]; !ok {
+			return fmt.Errorf("vetted: endpoint %q has invalid Method %q", e.Name, e.Method)
+		}
+	}
+	if e.MaxBytes < 0 {
+		return fmt.Errorf("vetted: endpoint %q has negative MaxBytes %d", e.Name, e.MaxBytes)
 	}
 	return nil
 }

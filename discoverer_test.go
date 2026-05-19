@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -518,6 +519,159 @@ func TestLatestSnapshot(t *testing.T) {
 	post := d.Latest()
 	if post.V4 == nil || post.V4.String() != "203.0.113.7" {
 		t.Errorf("Latest after Discover: V4=%v", post.V4)
+	}
+}
+
+// TestAttempt_MaxBytesAllowsLargeBodies pins the per-endpoint
+// MaxBytes override: the server streams 300 KB with the IP at byte
+// ~280 KB; the package default cap (256 KB) MUST miss the IP, while
+// a MaxBytes of 320 KB MUST capture it. Without this guard the
+// ivi-style endpoint (IP past 256 KB) silently regresses to
+// parser_miss.
+func TestAttempt_MaxBytesAllowsLargeBodies(t *testing.T) {
+	const ipNeedle = `"ip":"203.0.113.7"`
+	const filler = `"_filler":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"` // 71 bytes
+	// Build a 300 KB body with the IP at byte 280 K.
+	preamble := []byte(`{"ip":"not-the-real-ip-pad","data":[`)
+	body := make([]byte, 0, 300*1024)
+	body = append(body, preamble...)
+	for len(body) < 280*1024 {
+		body = append(body, []byte(filler+",")...)
+	}
+	// Mark the IP near byte 280 K.
+	body = append(body, []byte(`"real":`+ipNeedle+`,`)...)
+	for len(body) < 300*1024 {
+		body = append(body, []byte(filler+",")...)
+	}
+	body = append(body, []byte(`{}]}`)...)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	// Parser keys off "real":"ip":"..." inside the 280 K marker.
+	// We use a Regex parser to specifically match the marker.
+	markerParser := Regex(`"real":"ip":"((?:\d{1,3}\.){3}\d{1,3})"`)
+
+	// Default cap (MaxBytes=0): should miss — parser_miss.
+	{
+		d := New(
+			WithEndpoints(Endpoint{
+				Name: "default-cap", URL: srv.URL,
+				Family: Any, Cost: CostMinimal, Parser: markerParser,
+			}),
+			WithHTTPClient(V4, srv.Client()),
+			WithHTTPClient(V6, srv.Client()),
+			WithTimeout(3*time.Second),
+		)
+		res := d.Discover(t.Context())
+		if res.V4 != nil {
+			t.Errorf("default cap should miss IP past 256 KB, got V4=%v", res.V4)
+		}
+		var saw bool
+		for _, a := range res.Attempts {
+			if a.Family != V4 {
+				continue
+			}
+			saw = true
+			if a.FailReason != "parser_miss" {
+				t.Errorf("default cap FailReason = %q, want parser_miss", a.FailReason)
+			}
+		}
+		if !saw {
+			t.Fatalf("no v4 attempt recorded for default-cap case")
+		}
+	}
+
+	// Bumped cap (MaxBytes=320 KB): should hit.
+	{
+		d := New(
+			WithEndpoints(Endpoint{
+				Name: "bumped-cap", URL: srv.URL,
+				Family: Any, Cost: CostMinimal, Parser: markerParser,
+				MaxBytes: 320_000,
+			}),
+			WithHTTPClient(V4, srv.Client()),
+			WithHTTPClient(V6, srv.Client()),
+			WithTimeout(3*time.Second),
+		)
+		res := d.Discover(t.Context())
+		if res.V4 == nil || res.V4.String() != "203.0.113.7" {
+			t.Fatalf("bumped cap should parse IP at byte ~280 K, got V4=%v", res.V4)
+		}
+	}
+}
+
+// TestAttempt_MethodAndBodyForwarded pins down the POST+Body path:
+// the upstream MUST see the configured Method + Body verbatim.
+// Unlocks JSON-POST APIs (lamoda et al.) that 400 on a plain GET.
+func TestAttempt_MethodAndBodyForwarded(t *testing.T) {
+	var gotMethod atomic.Value
+	var gotBody atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod.Store(r.Method)
+		raw, _ := io.ReadAll(r.Body)
+		gotBody.Store(string(raw))
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"ip":"203.0.113.7"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := New(
+		WithEndpoints(Endpoint{
+			Name: "post-endpoint", URL: srv.URL,
+			Family: Any, Cost: CostMinimal,
+			Method: "POST", Body: []byte(`{"shape":"empty"}`),
+			Headers: map[string]string{"Content-Type": "application/json"},
+			Parser:  JSONKey("ip"),
+		}),
+		WithHTTPClient(V4, srv.Client()),
+		WithHTTPClient(V6, srv.Client()),
+		WithTimeout(2*time.Second),
+	)
+	res := d.Discover(t.Context())
+	if res.V4 == nil || res.V4.String() != "203.0.113.7" {
+		t.Fatalf("V4 = %v, want 203.0.113.7", res.V4)
+	}
+	if got, _ := gotMethod.Load().(string); got != "POST" {
+		t.Errorf("upstream Method = %q, want POST", got)
+	}
+	if got, _ := gotBody.Load().(string); got != `{"shape":"empty"}` {
+		t.Errorf("upstream Body = %q, want %q", got, `{"shape":"empty"}`)
+	}
+}
+
+// TestAttempt_DefaultsGETWithNilBody — explicit negative: empty
+// Method + nil Body must still produce a GET with no request body,
+// matching pre-Method-field behaviour for every existing endpoint.
+func TestAttempt_DefaultsGETWithNilBody(t *testing.T) {
+	var gotMethod atomic.Value
+	var bodyLen atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod.Store(r.Method)
+		raw, _ := io.ReadAll(r.Body)
+		bodyLen.Store(int64(len(raw)))
+		fmt.Fprint(w, `{"ip":"203.0.113.7"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := New(
+		WithEndpoints(Endpoint{
+			Name: "default", URL: srv.URL,
+			Family: Any, Cost: CostMinimal, Parser: JSONKey("ip"),
+		}),
+		WithHTTPClient(V4, srv.Client()),
+		WithHTTPClient(V6, srv.Client()),
+		WithTimeout(2*time.Second),
+	)
+	d.Discover(t.Context())
+	if got, _ := gotMethod.Load().(string); got != "GET" {
+		t.Errorf("default Method = %q, want GET", got)
+	}
+	if bodyLen.Load() != 0 {
+		t.Errorf("default Body length = %d, want 0", bodyLen.Load())
 	}
 }
 

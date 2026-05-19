@@ -1,6 +1,7 @@
 package vetted
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -426,7 +427,12 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 		d.tracer.AttemptEnd(spanCtx, ep, fam, out.ip, out.err)
 	}()
 
-	req, err := http.NewRequestWithContext(spanCtx, "GET", ep.URL, nil)
+	var reqBody io.Reader
+	if ep.Body != nil {
+		// Fresh reader per attempt — http.Client.Do consumes it.
+		reqBody = bytes.NewReader(ep.Body)
+	}
+	req, err := http.NewRequestWithContext(spanCtx, ep.method(), ep.URL, reqBody)
 	if err != nil {
 		out.err = err
 		return
@@ -446,7 +452,7 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, ep.readCap()))
 	if err != nil {
 		out.err = err
 		return

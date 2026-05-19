@@ -29,6 +29,8 @@ func TestEndpoint_Validate(t *testing.T) {
 		{"missing parser", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 1}, "Parser"},
 		{"invalid family", Endpoint{Name: "n", URL: "u", Family: "v7", Cost: 1, Parser: JSONQuoted()}, "Family"},
 		{"non-positive cost", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 0, Parser: JSONQuoted()}, "Cost"},
+		{"invalid method", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 1, Parser: JSONQuoted(), Method: "BREW"}, "Method"},
+		{"negative maxbytes", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 1, Parser: JSONQuoted(), MaxBytes: -1}, "MaxBytes"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,6 +66,33 @@ func TestDefaultEndpoints_UniqueNames(t *testing.T) {
 			t.Errorf("duplicate Name %q in DefaultEndpoints", ep.Name)
 		}
 		seen[ep.Name] = struct{}{}
+	}
+}
+
+// TestEndpoint_MethodDefault pins down the method() helper:
+// empty Method → GET, set Method → as-is. Centralised so attempt()
+// can rely on a single source of truth.
+func TestEndpoint_MethodDefault(t *testing.T) {
+	if got := (Endpoint{}).method(); got != "GET" {
+		t.Errorf("empty Method should default to GET, got %q", got)
+	}
+	if got := (Endpoint{Method: "POST"}).method(); got != "POST" {
+		t.Errorf("Method=POST should pass through, got %q", got)
+	}
+}
+
+// TestEndpoint_ReadCap pins down the cap-selection rule. Zero
+// MaxBytes → package default. Non-zero → the endpoint value
+// verbatim, even when smaller than the package default.
+func TestEndpoint_ReadCap(t *testing.T) {
+	if got := (Endpoint{}).readCap(); got != int64(maxResponseBytes) {
+		t.Errorf("zero MaxBytes should use package default %d, got %d", maxResponseBytes, got)
+	}
+	if got := (Endpoint{MaxBytes: 1024}).readCap(); got != 1024 {
+		t.Errorf("MaxBytes=1024 should override; got %d", got)
+	}
+	if got := (Endpoint{MaxBytes: 1024 * 1024}).readCap(); got != 1024*1024 {
+		t.Errorf("MaxBytes=1MB should override upwards too; got %d", got)
 	}
 }
 
