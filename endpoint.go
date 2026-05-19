@@ -228,6 +228,23 @@ var DefaultEndpoints = []Endpoint{
 		Parser: HTMLAttr("data-req-ip"),
 	},
 	{
+		// Live-verified: litres is fronted by DDoS-Guard, which
+		// injects a `__ddg9_=<client-ip>` Set-Cookie alongside
+		// `__ddg8_`/`__ddg10_`/`__ddg1_` siblings. The IP comes
+		// back in the HEADER, not the body — the Cookie parser
+		// reads it from Set-Cookie without touching the body.
+		// Body is still downloaded (557 KB landing, capped at
+		// the Discoverer's 256 KB) because we don't have a
+		// header-only optimisation yet; Cost is set to the
+		// effective cap, not the full body. If we add a HEAD or
+		// Range-request short-circuit later, drop Cost to ~500.
+		Name:   "litres",
+		URL:    "https://www.litres.ru/",
+		Family: Any,
+		Cost:   256000,
+		Parser: Cookie("__ddg9_"),
+	},
+	{
 		// Live-verified at ~1.77 MB. The IP appears in a JSON
 		// island as `"remoteAddress":"..."` at byte ~255200 — just
 		// inside the Discoverer's 256 KB response cap. Fragile: a

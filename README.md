@@ -88,6 +88,7 @@ HTML landing pages (fall-through, Cost = measured body size in bytes):
 | mail-speedtest | `speedtest.mail.ru/` | `Regex("IP: ...")` | 6900 | small landing |
 | wildberries | `www.wildberries.ru/` | `HTMLAttr("data-req-ip")` | 1600 | antibot variant from foreign IP; full landing larger inside RU (unmeasured) |
 | tbank | `www.tbank.ru` | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap |
+| litres | `www.litres.ru/` | `Cookie("__ddg9_")` | 256000 | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
 
 Removed during verification:
 

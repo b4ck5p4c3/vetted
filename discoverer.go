@@ -449,7 +449,7 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 		out.err = err
 		return
 	}
-	candidate, err := ep.Parser.Parse(body)
+	candidate, err := ep.Parser.Parse(resp.Header, body)
 	if err != nil {
 		out.err = err
 		return
