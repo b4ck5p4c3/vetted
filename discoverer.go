@@ -281,11 +281,13 @@ func (d *Discoverer) Latest() Result {
 //  2. re-runs every `interval` (default 15min when 0);
 //  3. or on Trigger() — the off-cycle refresh.
 //
-// Set VETTED_DISABLE=0 to suppress the loop entirely
-// (initial Discover and ticker both skipped). Useful only for
-// offline test environments.
+// Set VETTED_DISABLE=1 to suppress the loop entirely (initial
+// Discover and ticker both skipped). Useful only for offline test
+// environments — callers should not normally need this; constructing
+// a Discoverer with a custom (empty) endpoint set is a cleaner way to
+// disable discovery at use-site granularity.
 func (d *Discoverer) Run(ctx context.Context, interval time.Duration) {
-	if os.Getenv("VETTED_DISABLE") == "0" {
+	if os.Getenv("VETTED_DISABLE") == "1" {
 		if d.logger != nil {
 			d.logger.Debug("vetted: public IP discovery disabled via env")
 		}

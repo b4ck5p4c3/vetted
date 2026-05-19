@@ -69,29 +69,29 @@ host fails fast — which is the correct "no v6 here" signal.
 
 API endpoints (`CostMinimal`, race in parallel):
 
-| Name | URL | Parser | Notes |
-|---|---|---|---|
-| qms | `www.qms.ru/api/asn_provider/ip` | `JSONKey("ip")` | `X-Api-Key` header |
-| rt-speedtest | `speedtest.rt.ru/api/asn_provider/ip` | `JSONKey("ip")` | `X-Api-Key` header |
-| ipinfo | `ipinfo.io/json` | `JSONKey("ip")` | full geo JSON |
-| reg-speedtest | `speedtest.reg.ru/detect_ip_info` | `JSONKey("ip")` | `{"ip":"...","success":true}` |
-| start-proxycheck | `api.start.ru/account/proxycheck` | `JSONKey("ip")` | apikey query param baked into URL |
-| yandex-v4 | `ipv4-internet.yandex.net/api/v0/ip` | `JSONQuoted()` | v4-only host |
-| yandex-v6 | `ipv6-internet.yandex.net/api/v0/ip` | `JSONQuoted()` | v6-only host |
-| mail-ip | `ip.mail.ru/ip.html` | `JSONKey("ipAddress")` | JSONP wrapper |
+| Name             | URL                                   | Parser                 | Notes                             |
+| ---------------- | ------------------------------------- | ---------------------- | --------------------------------- |
+| qms              | `www.qms.ru/api/asn_provider/ip`      | `JSONKey("ip")`        | `X-Api-Key` header                |
+| rt-speedtest     | `speedtest.rt.ru/api/asn_provider/ip` | `JSONKey("ip")`        | `X-Api-Key` header                |
+| ipinfo           | `ipinfo.io/json`                      | `JSONKey("ip")`        | full geo JSON                     |
+| reg-speedtest    | `speedtest.reg.ru/detect_ip_info`     | `JSONKey("ip")`        | `{"ip":"...","success":true}`     |
+| start-proxycheck | `api.start.ru/account/proxycheck`     | `JSONKey("ip")`        | apikey query param baked into URL |
+| yandex-v4        | `ipv4-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v4-only host                      |
+| yandex-v6        | `ipv6-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v6-only host                      |
+| mail-ip          | `ip.mail.ru/ip.html`                  | `JSONKey("ipAddress")` | JSONP wrapper                     |
 
 HTML landing pages (fall-through, Cost = measured body size in bytes):
 
-| Name | URL | Parser | Cost | Notes |
-|---|---|---|---|---|
-| yandex-internet-v4 | `yandex.ru/internet/` | `Regex("v4":"...")` | 114200 | v4 race only |
-| yandex-internet-v6 | `yandex.ru/internet/` | `Regex("v6":"...")` | 114200 | v6 race only |
-| mail-speedtest | `speedtest.mail.ru/` | `Regex("IP: ...")` | 6900 | small landing |
-| wildberries | `www.wildberries.ru/` | `HTMLAttr("data-req-ip")` | 1600 | antibot variant from foreign IP; full landing larger inside RU (unmeasured) |
-| tbank | `www.tbank.ru` | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap |
-| litres | `www.litres.ru/` | `Cookie("__ddg9_")` | 256000 | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
-| lamoda-vpn-error | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")` | 194 | 403 with `{"code":10403,"data":{"ip":"..."}}` — opt-in via `AcceptStatus: [200, 403]` |
-| 2gis-antibot | `2gis.ru/` | `Regex(REQUEST-IP IP:...)` | 1411 | 403 antibot landing echoes IP in `<p id="REQUEST-IP">`; `AcceptStatus: [200, 403]` |
+| Name               | URL                                            | Parser                     | Cost    | Notes                                                                                                                                                            |
+| ------------------ | ---------------------------------------------- | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| yandex-internet-v4 | `yandex.ru/internet/`                          | `Regex("v4":"...")`        | 114200  | v4 race only                                                                                                                                                     |
+| yandex-internet-v6 | `yandex.ru/internet/`                          | `Regex("v6":"...")`        | 114200  | v6 race only                                                                                                                                                     |
+| mail-speedtest     | `speedtest.mail.ru/`                           | `Regex("IP: ...")`         | 6900    | small landing                                                                                                                                                    |
+| wildberries        | `www.wildberries.ru/`                          | `HTMLAttr("data-req-ip")`  | 1600    | antibot variant from foreign IP; full landing larger inside RU (unmeasured)                                                                                      |
+| tbank              | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
+| litres             | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 256000  | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
+| lamoda-vpn-error   | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — opt-in via `AcceptStatus: [200, 403]`                                                                            |
+| 2gis-antibot       | `2gis.ru/`                                     | `Regex(REQUEST-IP IP:...)` | 1411    | 403 antibot landing echoes IP in `<p id="REQUEST-IP">`; `AcceptStatus: [200, 403]`                                                                               |
 
 Removed during verification:
 
@@ -99,7 +99,7 @@ Removed during verification:
   itself with a `set-cookie: spid=...` antibot cookie pair on every
   hit and expects a JS-set companion cookie before answering with
   the geo JSON. Stateless clients (curl, surf without a cookie jar
-  + JS engine) loop forever. Not viable as a stateless probe.
+  - JS engine) loop forever. Not viable as a stateless probe.
 - **avito** (`www.avito.ru/`) — from foreign egress returns a 27 KB
   antibot page (`Доступ ограничен: проблема с IP`) with no IP
   echoed; from inside RU the IP is reported to sit ~1 MB into the

@@ -446,8 +446,8 @@ func TestTrigger_MultipleCallsCoalesce(t *testing.T) {
 	}
 }
 
-// TestRun_EnvDisable — VETTED_DISABLE=0 short-circuits
-// Run so neither the initial Discover nor the ticker fires.
+// TestRun_EnvDisable — VETTED_DISABLE=1 short-circuits Run so
+// neither the initial Discover nor the ticker fires.
 func TestRun_EnvDisable(t *testing.T) {
 	var hits atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -456,7 +456,7 @@ func TestRun_EnvDisable(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	t.Setenv("VETTED_DISABLE", "0")
+	t.Setenv("VETTED_DISABLE", "1")
 	d := New(
 		WithEndpoints(Endpoint{Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")}),
 		WithHTTPClient(V4, srv.Client()),
