@@ -407,30 +407,31 @@ var DefaultEndpoints = []Endpoint{
 		Cost:   1770000,
 		Parser: JSONKey("remoteAddress"),
 	},
-	// avito skipped — re-verified from both foreign and domestic-RU
-	// egress with the MaxBytes field available. Foreign egress: HTTP
-	// 403 with a 27 KB antibot interstitial ("Доступ ограничен:
-	// проблема с IP") and no requester-IP echo anywhere in that
-	// body. Domestic RU egress: HTTP 200 with a 985 KB landing that
-	// embeds the requester IP three times as `"ip":"<addr>"` at byte
-	// offsets ~957916 / ~958670 / ~959682. The Range header
-	// (`bytes=1000000-1100000`) is ignored in both cases — foreign
-	// egress still returns the 27 KB 403, and domestic egress
-	// returns HTTP 200 with the full ~1.16 MB body (not a 206
-	// slice). So MaxBytes-only-for-the-relevant-window does not
-	// work; the only way to read the IP is to download the full
-	// landing on every cycle. Two reasons to keep avito off the
-	// default list:
-	//   1. From foreign egress there is no IP to extract at all;
-	//   2. Setting MaxBytes to ~1_000_000 just for avito would
-	//      download a megabyte every cycle even when other cheaper
-	//      endpoints already succeeded (Cost-tier ordering only
-	//      sorts within a family — it doesn't skip an attempt that
-	//      is already eligible by Cost).
-	// Re-eligible if either the antibot variant starts echoing IP,
-	// or this library gains a "cancel within tier as soon as one
-	// wins" optimisation that makes a megabyte-class endpoint cheap
-	// when something else wins first.
+	{
+		// Live-verified from both foreign and domestic-RU egress.
+		// Domestic RU: HTTP 200, 985 KB landing, IP embedded three
+		// times as `"ip":"<addr>"` near byte offset ~958 K — needs
+		// MaxBytes ~1_000_000 to reach. Foreign egress: HTTP 403,
+		// 27 KB antibot interstitial ("Доступ ограничен: проблема
+		// с IP"), no IP echo anywhere → parser_miss, the
+		// discoverer just falls through to the next endpoint. Range
+		// header (`bytes=1000000-1100000`) is ignored in both
+		// directions (full body returned, not 206), so partial
+		// fetch is not possible.
+		//
+		// Cost is the full 1_000_000 B on purpose: callers cap
+		// eligibility with WithMaxCost. Default (no cap) lets
+		// avito race; WithMaxCost(CostMedium) or any value <
+		// 1_000_000 silently drops it. That is the honest
+		// bandwidth trade-off — the library does not hide the
+		// price, the caller chooses whether to pay it.
+		Name:     "avito",
+		URL:      "https://www.avito.ru/",
+		Family:   Any,
+		Cost:     1_000_000,
+		Parser:   JSONKey("ip"),
+		MaxBytes: 1_000_000,
+	},
 	{
 		// Live-verified: 748801 B body with a single
 		// `"ip":"159.195.6.55"` token at byte offset 266202. JSONKey

@@ -89,6 +89,7 @@ HTML landing pages (fall-through, Cost = measured body size in bytes):
 | mail-speedtest          | `speedtest.mail.ru/`                           | `Regex("IP: ...")`         | 6900    | small landing                                                                                                                                                    |
 | wildberries             | `www.wildberries.ru/`                          | `HTMLAttr("data-req-ip")`  | 1600    | antibot variant from foreign IP; full landing larger inside RU (unmeasured)                                                                                      |
 | ivi                     | `www.ivi.tv/`                                  | `JSONKey("ip")`            | 300000  | 748 KB landing; single `"ip":"..."` at byte ~266 K — `MaxBytes: 300_000` to reach it                                                                             |
+| avito                   | `www.avito.ru/`                                | `JSONKey("ip")`            | 1000000 | 985 KB landing from RU egress; IP near byte ~958 K — needs `MaxBytes: 1_000_000`. Foreign egress returns 27 KB 403 antibot → parser_miss, soft fail             |
 | tbank                   | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
 | litres                  | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 256000  | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
 | lamoda-vpn-error        | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — `AcceptStatus: [200, 403]`. Foreign/VPN egress only — 307-loops from domestic RU IPs                             |
@@ -103,30 +104,19 @@ Removed during verification:
   hit and expects a JS-set companion cookie before answering with
   the geo JSON. Stateless clients (curl, surf without a cookie jar
   - JS engine) loop forever. Not viable as a stateless probe.
-- **avito** (`www.avito.ru/`) — re-verified from both foreign and
-  domestic-RU egress with the new `MaxBytes` field available.
-  Foreign egress: HTTP 403 with a 27 KB antibot interstitial
-  ("Доступ ограничен: проблема с IP") and no requester-IP echo
-  anywhere. Domestic RU egress: HTTP 200 with a 985 KB landing that
-  embeds the IP three times as `"ip":"..."` near byte offset ~958 K.
-  The Range header (`bytes=1000000-1100000`) is ignored in both
-  cases — foreign egress still returns the 27 KB 403, and domestic
-  egress returns the full ~1.16 MB body (HTTP 200, not 206). So
-  the only way to read the IP is to download the full landing on
-  every cycle. Even with `MaxBytes` set to ~1_000_000 just for
-  avito, that's a megabyte every cycle even when cheaper endpoints
-  already win the race — not worth the bandwidth trade.
 
 ## Status
 
 All listed endpoints have been live-verified; parsers and costs
-above reflect measured body shape and size. Two endpoints
-(alfabank, avito) stay removed for the reasons documented in
-"Removed during verification". The three endpoints originally
-parked for follow-up (ivi, lamoda /information/get, lamoda
-/cms/topmenu_flexible) were re-verified with the new per-endpoint
-`MaxBytes` / `Method` / `Body` plumbing and have been added back to
-the default set.
+above reflect measured body shape and size. One endpoint (alfabank)
+stays removed for the reason documented in "Removed during
+verification". The four endpoints originally parked for follow-up
+(avito, ivi, lamoda /information/get, lamoda /cms/topmenu_flexible)
+were re-verified with the new per-endpoint `MaxBytes` / `Method` /
+`Body` plumbing and have been added back to the default set. avito
+in particular carries an honest `Cost: 1_000_000` so callers who
+cannot afford a megabyte per cycle drop it with
+`WithMaxCost(CostMedium)` or similar.
 
 ## License
 
