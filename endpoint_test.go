@@ -66,3 +66,36 @@ func TestDefaultEndpoints_UniqueNames(t *testing.T) {
 		seen[ep.Name] = struct{}{}
 	}
 }
+
+// TestAcceptStatus pins down the per-endpoint status gate. Empty
+// list = 200-299 only; explicit list = allowlist of exact codes.
+// The 2gis and lamoda-vpn-error endpoints rely on this to opt 403
+// past the default 2xx gate so the antibot body can be parsed.
+func TestAcceptStatus(t *testing.T) {
+	cases := []struct {
+		name    string
+		accept  []int
+		code    int
+		want    bool
+	}{
+		{"default 2xx allows 200", nil, 200, true},
+		{"default 2xx allows 299", nil, 299, true},
+		{"default 2xx rejects 199", nil, 199, false},
+		{"default 2xx rejects 300", nil, 300, false},
+		{"default 2xx rejects 403", nil, 403, false},
+		{"explicit 200+403 allows 200", []int{200, 403}, 200, true},
+		{"explicit 200+403 allows 403", []int{200, 403}, 403, true},
+		{"explicit 200+403 rejects 201", []int{200, 403}, 201, false},
+		{"explicit 200+403 rejects 500", []int{200, 403}, 500, false},
+		{"explicit empty list = default", []int{}, 200, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ep := Endpoint{AcceptStatus: c.accept}
+			if got := ep.acceptStatus(c.code); got != c.want {
+				t.Errorf("acceptStatus(%d) with %v = %v, want %v",
+					c.code, c.accept, got, c.want)
+			}
+		})
+	}
+}

@@ -439,7 +439,7 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 	}
 	defer resp.Body.Close()
 	out.att.HTTPStatus = resp.StatusCode
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !ep.acceptStatus(resp.StatusCode) {
 		out.err = fmt.Errorf("http %d", resp.StatusCode)
 		return
 	}

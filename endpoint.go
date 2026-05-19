@@ -50,7 +50,7 @@ const (
 
 // Endpoint describes one IP-echo service. Name is the short
 // identifier used in logs and span tags (no spaces). Parser
-// extracts the IP candidate from the response body; the Discoverer
+// extracts the IP candidate from the response; the Discoverer
 // then validates with net.ParseIP and rejects family-mismatched
 // candidates.
 type Endpoint struct {
@@ -60,6 +60,31 @@ type Endpoint struct {
 	Cost    Cost
 	Headers map[string]string
 	Parser  Parser
+
+	// AcceptStatus, when non-empty, lists HTTP status codes that
+	// are treated as "successful enough" to attempt body parse.
+	// Empty (default) means 200-299. Use to accommodate services
+	// that echo the requester IP in an antibot 403 / VPN-blocker
+	// 403 — 2gis.ru and lamoda's recommendations API both behave
+	// this way: a 403 body carries the IP as the entire reason for
+	// the rejection, and that body shape is more stable than the
+	// "happy path" 200 page (which is huge and may not embed the
+	// IP at all from foreign egress).
+	AcceptStatus []int
+}
+
+// acceptStatus returns true if the response code is in this
+// endpoint's accept set. AcceptStatus nil → default 200-299 range.
+func (e Endpoint) acceptStatus(code int) bool {
+	if len(e.AcceptStatus) == 0 {
+		return code >= 200 && code < 300
+	}
+	for _, c := range e.AcceptStatus {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate returns an error if the endpoint config is incomplete.
@@ -141,6 +166,15 @@ var DefaultEndpoints = []Endpoint{
 		// Live-verified: `{"ip":"...","success":true}` (37 bytes).
 		Name:   "reg-speedtest",
 		URL:    "https://speedtest.reg.ru/detect_ip_info",
+		Family: Any,
+		Cost:   CostMinimal,
+		Parser: JSONKey("ip"),
+	},
+	{
+		// Live-verified: 548 B body with `"ip":"..."` plus
+		// proxy / geo metadata. Plain 200 / JSON shape.
+		Name:   "start-proxycheck",
+		URL:    "https://api.start.ru/account/proxycheck?apikey=a20b12b279f744f2b3c7b5c5400c4eb5",
 		Family: Any,
 		Cost:   CostMinimal,
 		Parser: JSONKey("ip"),
@@ -243,6 +277,34 @@ var DefaultEndpoints = []Endpoint{
 		Family: Any,
 		Cost:   256000,
 		Parser: Cookie("__ddg9_"),
+	},
+	{
+		// Live-verified: lamoda's recommendations API returns
+		// HTTP 403 with body
+		// `{"code":10403,"message":"...","data":{"ip":"..."}}`
+		// (194 B) on requests from VPN / non-RU IPs — the IP is
+		// echoed back as part of the "VPN detected" payload.
+		// Requires AcceptStatus to opt past the 2xx gate.
+		Name:         "lamoda-vpn-error",
+		URL:          "https://www.lamoda.ru/api/v1/recommendations/section",
+		Family:       Any,
+		Cost:         194,
+		Parser:       JSONKey("ip"),
+		AcceptStatus: []int{200, 403},
+	},
+	{
+		// Live-verified: 2gis returns a 403 antibot landing on
+		// every stateless request (~1.4 KB) with the requester
+		// IP echoed as `<p id="REQUEST-IP">IP: <ip></p>`. The
+		// 200 happy path from inside RU likely has a different
+		// shape and the parser misses cleanly — accepting both
+		// codes is safe because parse failure is a soft error.
+		Name:         "2gis-antibot",
+		URL:          "https://2gis.ru/",
+		Family:       Any,
+		Cost:         1411,
+		Parser:       Regex(`REQUEST-IP[^<]*IP:\s*((?:\d{1,3}\.){3}\d{1,3})`),
+		AcceptStatus: []int{200, 403},
 	},
 	{
 		// Live-verified at ~1.77 MB. The IP appears in a JSON
