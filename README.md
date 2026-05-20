@@ -109,6 +109,27 @@ Removed during verification:
   `alfabank` entry above. Earlier removal commentary applied to the
   detect_ip variant only.
 
+## Live smoke test
+
+Opt-in regression alarm that hits every default endpoint over the
+real network from the current egress and prints a status matrix.
+Off by default — guarded by the `live` build tag so the normal
+`go test` stays hermetic. Run before merging an endpoint-table
+change, or whenever you suspect upstream rot:
+
+```
+go test -tags=live -timeout=120s -v -run TestLive_AllDefaultEndpoints .
+```
+
+The test fails only if fewer than five endpoints across both
+families resolve an IP — generous enough to tolerate transient
+DDoS-Guard / antibot flakes (litres in particular reissues
+`__ddg9_` per request and sometimes drops it), strict enough to
+catch broad-spectrum regressions like a parser breaking after a
+upstream redesign. Per-endpoint outcomes land in the matrix log
+even on PASS so a reader can spot the one regressed entry without
+re-running.
+
 ## Status
 
 All listed endpoints have been live-verified; parsers and costs
