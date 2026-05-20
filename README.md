@@ -184,4 +184,4 @@ echoes the IP in a 404 JSON message, so it is back in the API tier.
 
 ## License
 
-TBD.
+MIT, plus the Beer-Ware clause (Revision 42). See [LICENSE](LICENSE).
