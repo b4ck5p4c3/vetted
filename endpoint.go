@@ -112,6 +112,25 @@ type Endpoint struct {
 	// sees the IP. Set Cost to the same value as MaxBytes so the
 	// tier ordering reflects the bytes you will actually pull.
 	MaxBytes int
+
+	// OptionalFrom, when non-empty, documents the egress condition
+	// under which this endpoint is EXPECTED to fail. The library
+	// does not act on it — failures still bubble up with their real
+	// FailReason — but the annotation rides through to the Tracer
+	// via Attempt.Endpoint.OptionalFrom so operator dashboards can
+	// distinguish "real regression" from "documented expected
+	// failure for this deployment's egress" and avoid alerting on
+	// the latter.
+	//
+	// Values are free-form strings; conventional tags currently used
+	// in DefaultEndpoints are "domestic-RU egress" (lamoda variants:
+	// 307-loop on RU IPs, only return IP-bearing 403 on VPN /
+	// foreign) and "foreign egress" (avito / wildberries: full
+	// landing only served to RU IPs; foreign IPs get an antibot
+	// stub with no IP echo). Mobile-RU deployments will see lamoda
+	// fail every cycle — that is the documented behaviour, not a
+	// regression.
+	OptionalFrom string
 }
 
 // method returns the HTTP verb to use for this endpoint, defaulting
@@ -352,11 +371,12 @@ var DefaultEndpoints = []Endpoint{
 		// rejects it; from inside the RU segment it returns 200.
 		// Cost measured on the antibot variant — full landing
 		// inside RU is unmeasured from this environment.
-		Name:   "wildberries",
-		URL:    "https://www.wildberries.ru/",
-		Family: Any,
-		Cost:   1600,
-		Parser: HTMLAttr("data-req-ip"),
+		Name:         "wildberries",
+		URL:          "https://www.wildberries.ru/",
+		Family:       Any,
+		Cost:         1600,
+		Parser:       HTMLAttr("data-req-ip"),
+		OptionalFrom: "foreign egress",
 	},
 	{
 		// Live-verified: litres is fronted by DDoS-Guard, which
@@ -413,6 +433,7 @@ var DefaultEndpoints = []Endpoint{
 		Cost:         194,
 		Parser:       JSONKey("ip"),
 		AcceptStatus: []int{200, 403},
+		OptionalFrom: "domestic-RU egress",
 	},
 	{
 		// Live-verified: 2gis returns a 403 antibot landing on
@@ -460,12 +481,13 @@ var DefaultEndpoints = []Endpoint{
 		// 1_000_000 silently drops it. That is the honest
 		// bandwidth trade-off — the library does not hide the
 		// price, the caller chooses whether to pay it.
-		Name:     "avito",
-		URL:      "https://www.avito.ru/",
-		Family:   Any,
-		Cost:     1_000_000,
-		Parser:   JSONKey("ip"),
-		MaxBytes: 1_000_000,
+		Name:         "avito",
+		URL:          "https://www.avito.ru/",
+		Family:       Any,
+		Cost:         1_000_000,
+		Parser:       JSONKey("ip"),
+		MaxBytes:     1_000_000,
+		OptionalFrom: "foreign egress",
 	},
 	{
 		// Live-verified: 748801 B body with a single
@@ -506,6 +528,7 @@ var DefaultEndpoints = []Endpoint{
 		Headers:      map[string]string{"Content-Type": "application/json"},
 		Parser:       JSONKey("ip"),
 		AcceptStatus: []int{200, 403},
+		OptionalFrom: "domestic-RU egress",
 	},
 	{
 		// Live-verified: same shape and same body as
@@ -522,5 +545,6 @@ var DefaultEndpoints = []Endpoint{
 		Headers:      map[string]string{"Content-Type": "application/json"},
 		Parser:       JSONKey("ip"),
 		AcceptStatus: []int{200, 403},
+		OptionalFrom: "domestic-RU egress",
 	},
 }

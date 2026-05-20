@@ -109,6 +109,31 @@ Removed during verification:
   `alfabank` entry above. Earlier removal commentary applied to the
   detect_ip variant only.
 
+## Expected-failure annotations
+
+`Endpoint.OptionalFrom` is a free-form string that documents the
+egress under which an endpoint is *expected* to fail. The library
+does not act on it — failures still bubble up with their real
+`FailReason` — but the annotation rides through to the Tracer via
+`Attempt.Endpoint.OptionalFrom` so operator dashboards can
+distinguish documented expected failures from real regressions.
+
+Currently set in `DefaultEndpoints`:
+
+| Endpoint | OptionalFrom | Why |
+|---|---|---|
+| lamoda-vpn-error | `domestic-RU egress` | 403-with-IP only fires on VPN / foreign IPs; from a domestic RU phone the URL 307-loops |
+| lamoda-information-get | `domestic-RU egress` | same |
+| lamoda-topmenu-flexible | `domestic-RU egress` | same |
+| avito | `foreign egress` | landing-page IP echo only on RU IPs; foreign gets a 27 KB antibot stub with no IP |
+| wildberries | `foreign egress` | returns HTTP 451 from foreign IPs; full antibot landing only on RU |
+
+Mobile-RU deployments will see the three lamoda entries fail every
+cycle — that is documented expected behaviour, not a regression.
+Foreign / dev-machine deployments will see avito and wildberries
+fail the same way. Filter your alerting on
+`Attempt.Endpoint.OptionalFrom != ""` to drop the noise.
+
 ## Live smoke test
 
 Opt-in regression alarm that hits every default endpoint over the

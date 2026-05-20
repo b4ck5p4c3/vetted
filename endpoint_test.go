@@ -69,6 +69,29 @@ func TestDefaultEndpoints_UniqueNames(t *testing.T) {
 	}
 }
 
+// TestAttempt_OptionalFromRidesThroughAttempt pins the operator
+// contract: when an endpoint sets OptionalFrom, the same string is
+// reachable via Attempt.Endpoint.OptionalFrom on every recorded
+// attempt — failed or not. Dashboards depend on this to filter
+// documented expected-failure noise (lamoda probes from RU mobile,
+// avito from foreign egress) without re-encoding the per-endpoint
+// rules in the dashboard layer.
+func TestAttempt_OptionalFromRidesThroughAttempt(t *testing.T) {
+	var found bool
+	for _, ep := range DefaultEndpoints {
+		if ep.Name == "lamoda-vpn-error" {
+			found = true
+			if ep.OptionalFrom != "domestic-RU egress" {
+				t.Errorf("lamoda-vpn-error OptionalFrom = %q, want %q (mobile-RU deploys depend on this tag)",
+					ep.OptionalFrom, "domestic-RU egress")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("lamoda-vpn-error not in DefaultEndpoints — annotation scaffolding broken")
+	}
+}
+
 // TestEndpoint_MethodDefault pins down the method() helper:
 // empty Method → GET, set Method → as-is. Centralised so attempt()
 // can rely on a single source of truth.
