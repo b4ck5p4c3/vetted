@@ -43,6 +43,17 @@ res := d.Latest()
   Cost race in parallel within one tier; tiers are tried
   cheap-first sequentially. HTML landing pages only get hit when
   every cheap API has failed.
+- **Cancel-on-win.** As soon as one tier member returns a valid IP,
+  the in-flight requests for the rest of the tier get
+  context-cancelled and the cycle returns. The losers' Attempts
+  still get drained so Tracer sees them (with `FailReason=canceled`),
+  but the cycle is bounded by the WINNER's latency rather than the
+  slowest tier member's. On a filtered mobile RU network this
+  routinely shaves multiple seconds off a cycle.
+- **HEAD short-circuit.** Endpoints whose Parser only reads response
+  headers (Cookie parser on litres) set `Method: "HEAD"`. The
+  Discoverer skips the body read entirely, saving 256 KB per
+  litres-firing cycle.
 - **V4 + V6 in parallel.** Two dialer-pinned HTTP clients run
   independent races per family. A v4 result and v6 result land
   on the scope as separate values; either or both may be unset
@@ -81,7 +92,9 @@ API endpoints (`CostMinimal`, race in parallel):
 | yandex-v6        | `ipv6-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v6-only host                      |
 | mail-ip          | `ip.mail.ru/ip.html`                  | `JSONKey("ipAddress")` | JSONP wrapper                     |
 
-HTML landing pages (fall-through, Cost = measured body size in bytes):
+Fall-through endpoints (fire only after the CostMinimal API tier
+fails; Cost ≈ measured response size in bytes, with litres an
+exception at `CostSmall` because HEAD strips its body to ~600 B):
 
 | Name                    | URL                                            | Parser                     | Cost    | Notes                                                                                                                                                            |
 | ----------------------- | ---------------------------------------------- | -------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -92,7 +105,7 @@ HTML landing pages (fall-through, Cost = measured body size in bytes):
 | ivi                     | `www.ivi.tv/`                                  | `JSONKey("ip")`            | 300000  | 748 KB landing; single `"ip":"..."` at byte ~266 K — `MaxBytes: 300_000` to reach it                                                                             |
 | avito                   | `www.avito.ru/`                                | `JSONKey("ip")`            | 1000000 | 985 KB landing from RU egress; IP near byte ~958 K — needs `MaxBytes: 1_000_000`. Foreign egress returns 27 KB 403 antibot → parser_miss, soft fail             |
 | tbank                   | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
-| litres                  | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 256000  | DDoS-Guard echoes client IP in `__ddg9_` cookie; body downloaded (~557 KB, capped at 256 KB) but not parsed — header-only short-circuit is a future optimisation |
+| litres                  | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 500     | DDoS-Guard echoes client IP in `__ddg9_` Set-Cookie header; uses `Method: "HEAD"` so body is never transferred (~600 B headers per cycle). Sometimes drops the `__ddg9_` cookie on rate-limited requests — soft fail, falls through to next endpoint |
 | lamoda-vpn-error        | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — `AcceptStatus: [200, 403]`. Foreign/VPN egress only — 307-loops from domestic RU IPs                             |
 | lamoda-information-get  | `www.lamoda.ru/api/v1/information/get`         | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; needs `Method: "POST"` + `Body: []byte("{}")`. Same egress-direction caveat as lamoda-vpn-error                          |
 | lamoda-topmenu-flexible | `www.lamoda.ru/api/v1/cms/topmenu_flexible`    | `JSONKey("ip")`            | 50      | POST `{}` → same 403 / `data.ip` shape; sibling probe. Same egress-direction caveat as lamoda-vpn-error                                                          |

@@ -35,7 +35,21 @@
 // size in bytes. The Discoverer tries the cheapest eligible
 // endpoints first and only falls back to expensive ones (like
 // HTML-scraping a 50 KB landing page) when the cheap tier fails.
+// Endpoints at the same Cost form one tier and race in parallel;
+// as soon as one returns a valid IP the others are cancelled.
 // Callers on metered connections cap with WithMaxCost.
+//
+// # Expected-failure annotation
+//
+// Some endpoints are documented to fail under a specific egress
+// (lamoda probes from domestic-RU IPs always 307-loop; avito /
+// wildberries from foreign IPs return antibot stubs with no IP
+// echo). Endpoint.OptionalFrom carries that egress label; the
+// library does not act on it but it rides through to the Tracer
+// via Attempt.Endpoint so operator dashboards can filter the
+// documented expected-failure noise from real regressions. Mobile
+// RU deployments will see lamoda fail every cycle — that is the
+// documented contract, not a bug.
 //
 // # Family enforcement
 //
