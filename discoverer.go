@@ -1,11 +1,9 @@
 package vetted
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -413,9 +411,10 @@ func (d *Discoverer) raceTier(parent context.Context, fam Family, httpClient *ht
 	return nil, "", atts, lastErr
 }
 
-// attempt is the per-endpoint goroutine body — HTTP fetch, parse,
-// ParseIP, family enforcement, tracer span. The returned struct
-// is what raceTier collects to build Attempts.
+// attempt is the per-endpoint goroutine body — it delegates the
+// transport (HTTP fetch + parse, or STUN binding) to the endpoint's
+// Prober, then enforces family and records the tracer span. The
+// returned struct is what raceTier collects to build Attempts.
 func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *http.Client, ep Endpoint) (out struct {
 	ip  net.IP
 	src string
@@ -440,69 +439,31 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 		d.tracer.AttemptEnd(spanCtx, ep, fam, out.ip, out.err)
 	}()
 
-	var reqBody io.Reader
-	if ep.Body != nil {
-		// Fresh reader per attempt — http.Client.Do consumes it.
-		reqBody = bytes.NewReader(ep.Body)
-	}
-	req, err := http.NewRequestWithContext(spanCtx, ep.method(), ep.URL, reqBody)
+	res, err := ep.Prober.Probe(spanCtx, fam, httpClient)
+	out.att.HTTPStatus = res.HTTPStatus
 	if err != nil {
 		out.err = err
 		return
 	}
-	for k, v := range ep.Headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		out.err = err
-		return
-	}
-	defer resp.Body.Close()
-	out.att.HTTPStatus = resp.StatusCode
-	if !ep.acceptStatus(resp.StatusCode) {
-		out.err = fmt.Errorf("http %d", resp.StatusCode)
-		return
-	}
-
-	// HEAD never carries a body — skip the read so a server that
-	// sent Content-Length but no payload (correct for HEAD per
-	// RFC 9110, but trips io.ReadAll under surf's HTTP/2 transport
-	// with "unexpected EOF") doesn't fail the cycle. Cookie /
-	// header-only parsers don't read the body anyway, so passing
-	// an empty slice is semantically correct.
-	var body []byte
-	if ep.method() != "HEAD" {
-		body, err = io.ReadAll(io.LimitReader(resp.Body, ep.readCap()))
-		if err != nil {
-			out.err = err
-			return
-		}
-	}
-	candidate, err := ep.Parser.Parse(resp.Header, body)
-	if err != nil {
-		out.err = err
-		return
-	}
-	parsed := net.ParseIP(candidate)
+	parsed := res.IP
 	if parsed == nil {
-		out.err = fmt.Errorf("not an IP: %q", candidate)
+		out.err = fmt.Errorf("prober returned nil IP")
 		return
 	}
 	// Family enforcement. A dual-stack endpoint forced onto tcp4
 	// should never return a v6 address — but defence in depth, in
 	// case an intermediate proxy / antibot challenge injects a
-	// different family into the response body.
+	// different family into the response.
 	is4 := parsed.To4() != nil
 	switch fam {
 	case V4:
 		if !is4 {
-			out.err = fmt.Errorf("expected v4, got v6: %q", candidate)
+			out.err = fmt.Errorf("expected v4, got v6: %q", parsed)
 			return
 		}
 	case V6:
 		if is4 {
-			out.err = fmt.Errorf("expected v6, got v4: %q", candidate)
+			out.err = fmt.Errorf("expected v6, got v4: %q", parsed)
 			return
 		}
 	}

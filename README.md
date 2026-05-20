@@ -63,6 +63,20 @@ res := d.Latest()
   Impersonate — JA3/JA4 TLS fingerprint + matching User-Agent.
   Necessary for the HTML landing pages (wildberries, tbank) that
   would otherwise return an antibot interstitial.
+- **Pluggable transports (`Prober`).** Each `Endpoint` carries a
+  `Prober` that performs the transport-specific fetch; the Discoverer
+  owns the race, cost tiering, family enforcement and tracing. Two
+  ship: `HTTPProbe` (fetch a URL, extract the IP with a `Parser`) and
+  `STUNProbe` (STUN Binding Request over TCP). A caller can add its
+  own transport — e.g. a TURN host parsed out of a live OK.ru call
+  config — by implementing `Prober` and passing it via `WithEndpoints`.
+- **STUN over TCP.** `STUNProbe` reads the reflexive address from
+  XOR-MAPPED-ADDRESS. Transport is TCP, not UDP: RU mobile carriers
+  (measured on Beeline LTE) drop outbound UDP to STUN ports while
+  passing TCP, so UDP STUN never answers. `stun.rtc.yandex.net:3478`
+  is the one reachable RU STUN server and, unlike the HTTP probes, is
+  egress-independent (works in-RU and abroad) — the most reliable
+  backstop, measured ~1.1s on Beeline LTE.
 - **Pluggable tracer.** `Tracer` is a small interface
   (CycleStart/End, AttemptStart/End) with a `NoopTracer` default.
   Sentry / OpenTelemetry adapters live in the calling code, not
@@ -87,7 +101,8 @@ API endpoints (`CostMinimal`, race in parallel):
 | ipinfo           | `ipinfo.io/json`                      | `JSONKey("ip")`        | full geo JSON                     |
 | reg-speedtest    | `speedtest.reg.ru/detect_ip_info`     | `JSONKey("ip")`        | `{"ip":"...","success":true}`     |
 | start-proxycheck | `api.start.ru/account/proxycheck`     | `JSONKey("ip")`        | apikey query param baked into URL |
-| alfabank         | `alfabank.ru/api/v2/geo-facade/geo/ip`| `Regex(IP X.X.X.X)`    | 404 JSON `"по IP <ip> нет информации"` (Russian message); ServicePipe one-hop 307+cookie antibot; `AcceptStatus: [200, 404]`; needs HTML `Accept` header |
+| yandex-stun      | `stun.rtc.yandex.net:3478`            | `STUNProbe` (TCP)      | STUN Binding over TCP; egress-independent (works in-RU and abroad); fastest reliable probe (~1.1s on Beeline LTE). UDP STUN is dropped by RU mobile carriers — TCP only |
+| alfabank         | `alfabank.ru/api/v2/geo-facade/geo/ip`| `Regex(IP X.X.X.X)`    | 404 JSON `"по IP <ip> нет информации"` (Russian message); ServicePipe one-hop 307+cookie antibot; `AcceptStatus: [200, 404]`; needs HTML `Accept` header. parser_miss from RU mobile (response shape differs) |
 | yandex-v4        | `ipv4-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v4-only host                      |
 | yandex-v6        | `ipv6-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v6-only host                      |
 | mail-ip          | `ip.mail.ru/ip.html`                  | `JSONKey("ipAddress")` | JSONP wrapper                     |
@@ -121,6 +136,16 @@ Removed during verification:
   behaviour — it is the one-hop ServicePipe replay covered by the
   `alfabank` entry above. Earlier removal commentary applied to the
   detect_ip variant only.
+- **STUN: everything except `stun.rtc.yandex.net`** — measured from
+  Beeline LTE (USB-tethered Linux host, mobile egress). UDP STUN is
+  dropped wholesale by the carrier (only UDP/53 passes), so
+  `stun.l.google.com`, `stun.yandex.ru`, `stun.vk.com`, `stun.mail.ru`
+  all time out on UDP. Over TCP only `stun.rtc.yandex.net:3478`
+  answered. The OK.ru / okcdn WebRTC hosts (`videowebrtc.okcdn.ru`,
+  `calls.okcdn.ru`, the rotating `maxvdNNN.okcdn.ru` pool) resolve but
+  do not answer STUN on 3478/5349; their `:443` accepts TCP then drops
+  raw STUN bytes (TLS-fronted TURN under auth, not open STUN). Not
+  usable as stateless probes.
 
 ## Expected-failure annotations
 

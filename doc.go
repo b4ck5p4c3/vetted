@@ -16,9 +16,23 @@
 //
 // # What this is not
 //
-// Not a STUN client, not a TURN client, not an IP geolocation
-// library. Single responsibility: given a list of endpoints that
-// echo the requester's IP, return the IPs visible from the host.
+// Not a TURN client, not an IP geolocation library. Single
+// responsibility: given a list of endpoints that echo the
+// requester's IP, return the IPs visible from the host.
+//
+// # Transports (Prober)
+//
+// Each Endpoint carries a Prober that performs the transport-specific
+// fetch; the Discoverer owns the family race, cost tiering and
+// tracing. Two probers ship: HTTPProbe (fetch a URL, extract the IP
+// with a Parser) and STUNProbe (STUN Binding Request over TCP,
+// reading XOR-MAPPED-ADDRESS). STUN is TCP-only on purpose — RU
+// mobile carriers (measured on Beeline LTE) drop outbound UDP to STUN
+// ports while passing TCP, so UDP STUN never answers from the target
+// environment. The one reachable RU STUN server, stun.rtc.yandex.net,
+// is in the default set and is egress-independent (works in-RU and
+// abroad), making it the most reliable backstop. New transports only
+// need to implement Prober.
 //
 // # API shape
 //

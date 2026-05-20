@@ -37,12 +37,14 @@ func TestDiscover_ResolvesIPFromQmsShape(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name:    "fake",
-			URL:     srv.URL,
-			Family:  Any,
-			Cost:    CostMinimal,
-			Headers: map[string]string{"X-Api-Key": "secret"},
-			Parser:  JSONKey("ip"),
+			Name:   "fake",
+			Family: Any,
+			Cost:   CostMinimal,
+			Prober: &HTTPProbe{
+				URL:     srv.URL,
+				Headers: map[string]string{"X-Api-Key": "secret"},
+				Parser:  JSONKey("ip"),
+			},
 		}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
@@ -64,10 +66,10 @@ func TestDiscover_ResolvesIPFromQmsShape(t *testing.T) {
 // ones — load-bearing for the metered-network use case.
 func TestEligibleTiers_CostOrderAndGrouping(t *testing.T) {
 	d := New(WithEndpoints(
-		Endpoint{Name: "expensive", URL: "u", Family: Any, Cost: CostHigh, Parser: JSONQuoted()},
-		Endpoint{Name: "cheap1", URL: "u", Family: Any, Cost: CostMinimal, Parser: JSONQuoted()},
-		Endpoint{Name: "medium", URL: "u", Family: Any, Cost: CostMedium, Parser: JSONQuoted()},
-		Endpoint{Name: "cheap2", URL: "u", Family: Any, Cost: CostMinimal, Parser: JSONQuoted()},
+		Endpoint{Name: "expensive", Family: Any, Cost: CostHigh, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
+		Endpoint{Name: "cheap1", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
+		Endpoint{Name: "medium", Family: Any, Cost: CostMedium, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
+		Endpoint{Name: "cheap2", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
 	))
 	tiers := d.eligibleTiers(V4)
 	if len(tiers) != 3 {
@@ -88,9 +90,9 @@ func TestEligibleTiers_CostOrderAndGrouping(t *testing.T) {
 // neither Any nor the requested family.
 func TestEligibleTiers_FamilyFilter(t *testing.T) {
 	d := New(WithEndpoints(
-		Endpoint{Name: "v4-only", URL: "u", Family: V4, Cost: CostMinimal, Parser: JSONQuoted()},
-		Endpoint{Name: "v6-only", URL: "u", Family: V6, Cost: CostMinimal, Parser: JSONQuoted()},
-		Endpoint{Name: "any", URL: "u", Family: Any, Cost: CostMinimal, Parser: JSONQuoted()},
+		Endpoint{Name: "v4-only", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
+		Endpoint{Name: "v6-only", Family: V6, Cost: CostMinimal, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
+		Endpoint{Name: "any", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
 	))
 	v4tiers := d.eligibleTiers(V4)
 	if len(v4tiers) != 1 || len(v4tiers[0]) != 2 {
@@ -107,8 +109,8 @@ func TestEligibleTiers_FamilyFilter(t *testing.T) {
 func TestEligibleTiers_MaxCostCap(t *testing.T) {
 	d := New(
 		WithEndpoints(
-			Endpoint{Name: "cheap", URL: "u", Family: Any, Cost: CostMinimal, Parser: JSONQuoted()},
-			Endpoint{Name: "expensive", URL: "u", Family: Any, Cost: CostHigh, Parser: JSONQuoted()},
+			Endpoint{Name: "cheap", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
+			Endpoint{Name: "expensive", Family: Any, Cost: CostHigh, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
 		),
 		WithMaxCost(CostSmall),
 	)
@@ -138,8 +140,8 @@ func TestDiscover_RaceFirstResponderWins(t *testing.T) {
 
 	d := New(
 		WithEndpoints(
-			Endpoint{Name: "slow", URL: slow.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")},
-			Endpoint{Name: "fast", URL: fast.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")},
+			Endpoint{Name: "slow", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: slow.URL, Parser: JSONKey("ip")}},
+			Endpoint{Name: "fast", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: fast.URL, Parser: JSONKey("ip")}},
 		),
 		WithHTTPClient(V4, fast.Client()),
 		WithHTTPClient(V6, fast.Client()),
@@ -191,8 +193,8 @@ func TestRaceTier_CancelsLosersOnFirstWin(t *testing.T) {
 	// triggers the cancel-on-win path) and mask the v4 short-circuit.
 	d := New(
 		WithEndpoints(
-			Endpoint{Name: "slow", URL: slow.URL, Family: V4, Cost: CostMinimal, Parser: JSONKey("ip")},
-			Endpoint{Name: "fast", URL: fast.URL, Family: V4, Cost: CostMinimal, Parser: JSONKey("ip")},
+			Endpoint{Name: "slow", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: slow.URL, Parser: JSONKey("ip")}},
+			Endpoint{Name: "fast", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: fast.URL, Parser: JSONKey("ip")}},
 		),
 		WithHTTPClient(V4, fast.Client()),
 		WithHTTPClient(V6, fast.Client()),
@@ -242,8 +244,8 @@ func TestDiscover_FallsThroughCheapTier(t *testing.T) {
 
 	d := New(
 		WithEndpoints(
-			Endpoint{Name: "cheap-broken", URL: broken.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")},
-			Endpoint{Name: "expensive-ok", URL: working.URL, Family: Any, Cost: CostHigh, Parser: JSONKey("ip")},
+			Endpoint{Name: "cheap-broken", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: broken.URL, Parser: JSONKey("ip")}},
+			Endpoint{Name: "expensive-ok", Family: Any, Cost: CostHigh, Prober: &HTTPProbe{URL: working.URL, Parser: JSONKey("ip")}},
 		),
 		WithHTTPClient(V4, working.Client()),
 		WithHTTPClient(V6, working.Client()),
@@ -288,8 +290,8 @@ func TestAttempt_FamilyMismatchRejection(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "v4-returns-v6", URL: srv.URL,
-			Family: V4, Cost: CostMinimal, Parser: JSONKey("ip"),
+			Name: "v4-returns-v6", Family: V4, Cost: CostMinimal,
+			Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")},
 		}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
@@ -344,7 +346,7 @@ func TestAttempt_ErrorClassification(t *testing.T) {
 			t.Cleanup(srv.Close)
 
 			d := New(
-				WithEndpoints(Endpoint{Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal, Parser: c.parser}),
+				WithEndpoints(Endpoint{Name: "t", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: srv.URL, Parser: c.parser}}),
 				WithHTTPClient(V4, srv.Client()),
 				WithHTTPClient(V6, srv.Client()),
 				WithTimeout(2*time.Second),
@@ -401,9 +403,12 @@ func TestAttempt_HeaderForwarding(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal,
-			Headers: map[string]string{"X-Api-Key": "shibboleth"},
-			Parser:  JSONKey("ip"),
+			Name: "t", Family: Any, Cost: CostMinimal,
+			Prober: &HTTPProbe{
+				URL:     srv.URL,
+				Headers: map[string]string{"X-Api-Key": "shibboleth"},
+				Parser:  JSONKey("ip"),
+			},
 		}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
@@ -427,7 +432,7 @@ func TestTrigger_OffCycleDiscoveryFires(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	d := New(
-		WithEndpoints(Endpoint{Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")}),
+		WithEndpoints(Endpoint{Name: "t", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")}}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
 		WithTimeout(2*time.Second),
@@ -471,7 +476,7 @@ func TestTrigger_MultipleCallsCoalesce(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	d := New(
-		WithEndpoints(Endpoint{Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")}),
+		WithEndpoints(Endpoint{Name: "t", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")}}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
 		WithTimeout(5*time.Second),
@@ -532,7 +537,7 @@ func TestRun_EnvDisable(t *testing.T) {
 
 	t.Setenv("VETTED_DISABLE", "1")
 	d := New(
-		WithEndpoints(Endpoint{Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")}),
+		WithEndpoints(Endpoint{Name: "t", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")}}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
 		WithTimeout(1*time.Second),
@@ -561,8 +566,8 @@ func TestRun_EnvDisable(t *testing.T) {
 func TestNoEligibleEndpoints(t *testing.T) {
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "v6only", URL: "https://example.test/",
-			Family: V6, Cost: CostMinimal, Parser: JSONQuoted(),
+			Name: "v6only", Family: V6, Cost: CostMinimal,
+			Prober: &HTTPProbe{URL: "https://example.test/", Parser: JSONQuoted()},
 		}),
 	)
 	res := d.Discover(t.Context())
@@ -579,7 +584,7 @@ func TestLatestSnapshot(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	d := New(
-		WithEndpoints(Endpoint{Name: "t", URL: srv.URL, Family: Any, Cost: CostMinimal, Parser: JSONKey("ip")}),
+		WithEndpoints(Endpoint{Name: "t", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")}}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
 		WithTimeout(2*time.Second),
@@ -632,8 +637,8 @@ func TestAttempt_MaxBytesAllowsLargeBodies(t *testing.T) {
 	{
 		d := New(
 			WithEndpoints(Endpoint{
-				Name: "default-cap", URL: srv.URL,
-				Family: Any, Cost: CostMinimal, Parser: markerParser,
+				Name: "default-cap", Family: Any, Cost: CostMinimal,
+				Prober: &HTTPProbe{URL: srv.URL, Parser: markerParser},
 			}),
 			WithHTTPClient(V4, srv.Client()),
 			WithHTTPClient(V6, srv.Client()),
@@ -662,9 +667,8 @@ func TestAttempt_MaxBytesAllowsLargeBodies(t *testing.T) {
 	{
 		d := New(
 			WithEndpoints(Endpoint{
-				Name: "bumped-cap", URL: srv.URL,
-				Family: Any, Cost: CostMinimal, Parser: markerParser,
-				MaxBytes: 320_000,
+				Name: "bumped-cap", Family: Any, Cost: CostMinimal,
+				Prober: &HTTPProbe{URL: srv.URL, Parser: markerParser, MaxBytes: 320_000},
 			}),
 			WithHTTPClient(V4, srv.Client()),
 			WithHTTPClient(V6, srv.Client()),
@@ -694,11 +698,14 @@ func TestAttempt_MethodAndBodyForwarded(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "post-endpoint", URL: srv.URL,
-			Family: Any, Cost: CostMinimal,
-			Method: "POST", Body: []byte(`{"shape":"empty"}`),
-			Headers: map[string]string{"Content-Type": "application/json"},
-			Parser:  JSONKey("ip"),
+			Name: "post-endpoint", Family: Any, Cost: CostMinimal,
+			Prober: &HTTPProbe{
+				URL:     srv.URL,
+				Method:  "POST",
+				Body:    []byte(`{"shape":"empty"}`),
+				Headers: map[string]string{"Content-Type": "application/json"},
+				Parser:  JSONKey("ip"),
+			},
 		}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
@@ -732,8 +739,8 @@ func TestAttempt_DefaultsGETWithNilBody(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "default", URL: srv.URL,
-			Family: Any, Cost: CostMinimal, Parser: JSONKey("ip"),
+			Name: "default", Family: Any, Cost: CostMinimal,
+			Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")},
 		}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
@@ -772,10 +779,8 @@ func TestAttempt_HEADWithCookieParser(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "litres-shape", URL: srv.URL,
-			Family: V4, Cost: CostSmall,
-			Method: "HEAD",
-			Parser: Cookie("__ddg9_"),
+			Name: "litres-shape", Family: V4, Cost: CostSmall,
+			Prober: &HTTPProbe{URL: srv.URL, Method: "HEAD", Parser: Cookie("__ddg9_")},
 		}),
 		WithHTTPClient(V4, srv.Client()),
 		WithHTTPClient(V6, srv.Client()),
@@ -827,10 +832,12 @@ func TestAttempt_FollowsRedirectWithCookieJar(t *testing.T) {
 
 	d := New(
 		WithEndpoints(Endpoint{
-			Name: "alfa-shape", URL: srv.URL,
-			Family: Any, Cost: CostMinimal,
-			AcceptStatus: []int{200, 404},
-			Parser:       Regex(`IP\s+((?:\d{1,3}\.){3}\d{1,3})`),
+			Name: "alfa-shape", Family: Any, Cost: CostMinimal,
+			Prober: &HTTPProbe{
+				URL:          srv.URL,
+				AcceptStatus: []int{200, 404},
+				Parser:       Regex(`IP\s+((?:\d{1,3}\.){3}\d{1,3})`),
+			},
 		}),
 		WithHTTPClient(V4, client),
 		WithHTTPClient(V6, client),

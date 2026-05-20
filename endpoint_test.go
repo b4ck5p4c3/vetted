@@ -1,6 +1,7 @@
 package vetted
 
-// Endpoint type tests: Validate() and DefaultEndpoints invariants.
+// Endpoint + Prober config tests: Validate() and DefaultEndpoints
+// invariants.
 
 import (
 	"strings"
@@ -10,27 +11,30 @@ import (
 func TestEndpoint_Validate(t *testing.T) {
 	good := Endpoint{
 		Name:   "ok",
-		URL:    "https://example.test/",
 		Family: Any,
 		Cost:   CostMinimal,
-		Parser: JSONQuoted(),
+		Prober: &HTTPProbe{URL: "https://example.test/", Parser: JSONQuoted()},
 	}
 	if err := good.Validate(); err != nil {
 		t.Fatalf("good endpoint should validate, got %v", err)
 	}
 
+	httpProbe := func() *HTTPProbe { return &HTTPProbe{URL: "u", Parser: JSONQuoted()} }
 	cases := []struct {
 		name string
 		ep   Endpoint
 		want string
 	}{
-		{"missing name", Endpoint{URL: "u", Family: Any, Cost: 1, Parser: JSONQuoted()}, "Name"},
-		{"missing url", Endpoint{Name: "n", Family: Any, Cost: 1, Parser: JSONQuoted()}, "URL"},
-		{"missing parser", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 1}, "Parser"},
-		{"invalid family", Endpoint{Name: "n", URL: "u", Family: "v7", Cost: 1, Parser: JSONQuoted()}, "Family"},
-		{"non-positive cost", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 0, Parser: JSONQuoted()}, "Cost"},
-		{"invalid method", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 1, Parser: JSONQuoted(), Method: "BREW"}, "Method"},
-		{"negative maxbytes", Endpoint{Name: "n", URL: "u", Family: Any, Cost: 1, Parser: JSONQuoted(), MaxBytes: -1}, "MaxBytes"},
+		{"missing name", Endpoint{Family: Any, Cost: 1, Prober: httpProbe()}, "Name"},
+		{"invalid family", Endpoint{Name: "n", Family: "v7", Cost: 1, Prober: httpProbe()}, "Family"},
+		{"non-positive cost", Endpoint{Name: "n", Family: Any, Cost: 0, Prober: httpProbe()}, "Cost"},
+		{"missing prober", Endpoint{Name: "n", Family: Any, Cost: 1}, "Prober"},
+		{"http missing url", Endpoint{Name: "n", Family: Any, Cost: 1, Prober: &HTTPProbe{Parser: JSONQuoted()}}, "URL"},
+		{"http missing parser", Endpoint{Name: "n", Family: Any, Cost: 1, Prober: &HTTPProbe{URL: "u"}}, "Parser"},
+		{"http invalid method", Endpoint{Name: "n", Family: Any, Cost: 1, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted(), Method: "BREW"}}, "Method"},
+		{"http negative maxbytes", Endpoint{Name: "n", Family: Any, Cost: 1, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted(), MaxBytes: -1}}, "MaxBytes"},
+		{"stun missing addr", Endpoint{Name: "n", Family: Any, Cost: 1, Prober: &STUNProbe{}}, "Addr"},
+		{"stun bad addr", Endpoint{Name: "n", Family: Any, Cost: 1, Prober: &STUNProbe{Addr: "no-port"}}, "host:port"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -69,13 +73,26 @@ func TestDefaultEndpoints_UniqueNames(t *testing.T) {
 	}
 }
 
+// TestDefaultEndpoints_HasSTUN guards that the one STUN probe found
+// reachable from RU mobile (stun.rtc.yandex.net over TCP) stays in
+// the default set — it is the egress-independent backstop.
+func TestDefaultEndpoints_HasSTUN(t *testing.T) {
+	for _, ep := range DefaultEndpoints {
+		if s, ok := ep.Prober.(*STUNProbe); ok {
+			if s.Addr != "stun.rtc.yandex.net:3478" {
+				t.Errorf("STUN endpoint Addr = %q, want stun.rtc.yandex.net:3478", s.Addr)
+			}
+			return
+		}
+	}
+	t.Fatal("no STUNProbe in DefaultEndpoints")
+}
+
 // TestAttempt_OptionalFromRidesThroughAttempt pins the operator
 // contract: when an endpoint sets OptionalFrom, the same string is
-// reachable via Attempt.Endpoint.OptionalFrom on every recorded
-// attempt — failed or not. Dashboards depend on this to filter
-// documented expected-failure noise (lamoda probes from RU mobile,
-// avito from foreign egress) without re-encoding the per-endpoint
-// rules in the dashboard layer.
+// reachable via Attempt.Endpoint.OptionalFrom. Dashboards depend on
+// this to filter documented expected-failure noise (lamoda from RU
+// mobile, avito from foreign egress) without re-encoding the rules.
 func TestAttempt_OptionalFromRidesThroughAttempt(t *testing.T) {
 	var found bool
 	for _, ep := range DefaultEndpoints {
@@ -92,43 +109,41 @@ func TestAttempt_OptionalFromRidesThroughAttempt(t *testing.T) {
 	}
 }
 
-// TestEndpoint_MethodDefault pins down the method() helper:
-// empty Method → GET, set Method → as-is. Centralised so attempt()
-// can rely on a single source of truth.
-func TestEndpoint_MethodDefault(t *testing.T) {
-	if got := (Endpoint{}).method(); got != "GET" {
+// TestHTTPProbe_MethodDefault pins down the method() helper: empty
+// Method → GET, set Method → as-is.
+func TestHTTPProbe_MethodDefault(t *testing.T) {
+	if got := (&HTTPProbe{}).method(); got != "GET" {
 		t.Errorf("empty Method should default to GET, got %q", got)
 	}
-	if got := (Endpoint{Method: "POST"}).method(); got != "POST" {
+	if got := (&HTTPProbe{Method: "POST"}).method(); got != "POST" {
 		t.Errorf("Method=POST should pass through, got %q", got)
 	}
 }
 
-// TestEndpoint_ReadCap pins down the cap-selection rule. Zero
-// MaxBytes → package default. Non-zero → the endpoint value
-// verbatim, even when smaller than the package default.
-func TestEndpoint_ReadCap(t *testing.T) {
-	if got := (Endpoint{}).readCap(); got != int64(maxResponseBytes) {
+// TestHTTPProbe_ReadCap pins down the cap-selection rule. Zero
+// MaxBytes → package default. Non-zero → the value verbatim, even
+// when smaller than the package default.
+func TestHTTPProbe_ReadCap(t *testing.T) {
+	if got := (&HTTPProbe{}).readCap(); got != int64(maxResponseBytes) {
 		t.Errorf("zero MaxBytes should use package default %d, got %d", maxResponseBytes, got)
 	}
-	if got := (Endpoint{MaxBytes: 1024}).readCap(); got != 1024 {
+	if got := (&HTTPProbe{MaxBytes: 1024}).readCap(); got != 1024 {
 		t.Errorf("MaxBytes=1024 should override; got %d", got)
 	}
-	if got := (Endpoint{MaxBytes: 1024 * 1024}).readCap(); got != 1024*1024 {
+	if got := (&HTTPProbe{MaxBytes: 1024 * 1024}).readCap(); got != 1024*1024 {
 		t.Errorf("MaxBytes=1MB should override upwards too; got %d", got)
 	}
 }
 
 // TestAcceptStatus pins down the per-endpoint status gate. Empty
 // list = 200-299 only; explicit list = allowlist of exact codes.
-// The 2gis and lamoda-vpn-error endpoints rely on this to opt 403
-// past the default 2xx gate so the antibot body can be parsed.
+// 2gis and lamoda rely on this to opt 403 past the default 2xx gate.
 func TestAcceptStatus(t *testing.T) {
 	cases := []struct {
-		name    string
-		accept  []int
-		code    int
-		want    bool
+		name   string
+		accept []int
+		code   int
+		want   bool
 	}{
 		{"default 2xx allows 200", nil, 200, true},
 		{"default 2xx allows 299", nil, 299, true},
@@ -143,8 +158,8 @@ func TestAcceptStatus(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			ep := Endpoint{AcceptStatus: c.accept}
-			if got := ep.acceptStatus(c.code); got != c.want {
+			h := &HTTPProbe{AcceptStatus: c.accept}
+			if got := h.acceptStatus(c.code); got != c.want {
 				t.Errorf("acceptStatus(%d) with %v = %v, want %v",
 					c.code, c.accept, got, c.want)
 			}
