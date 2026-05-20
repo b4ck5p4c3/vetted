@@ -748,6 +748,51 @@ func TestAttempt_DefaultsGETWithNilBody(t *testing.T) {
 	}
 }
 
+// TestAttempt_HEADWithCookieParser pins the litres optimisation:
+// when an endpoint's parser only needs headers (Cookie parser),
+// HEAD is enough — the upstream must see HEAD, not GET, and the
+// parser must extract the IP from the response header even though
+// the body is empty. Saves ~256 KB per cycle on the litres path,
+// which is the load-bearing win on metered mobile data.
+func TestAttempt_HEADWithCookieParser(t *testing.T) {
+	var gotMethod atomic.Value
+	var bodyBytes atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod.Store(r.Method)
+		http.SetCookie(w, &http.Cookie{Name: "__ddg8_", Value: "noise", Path: "/"})
+		http.SetCookie(w, &http.Cookie{Name: "__ddg9_", Value: "203.0.113.7", Path: "/"})
+		http.SetCookie(w, &http.Cookie{Name: "__ddg1_", Value: "noise2", Path: "/"})
+		if r.Method == "HEAD" {
+			return
+		}
+		n, _ := fmt.Fprint(w, strings.Repeat("X", 256*1024))
+		bodyBytes.Store(int64(n))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := New(
+		WithEndpoints(Endpoint{
+			Name: "litres-shape", URL: srv.URL,
+			Family: V4, Cost: CostSmall,
+			Method: "HEAD",
+			Parser: Cookie("__ddg9_"),
+		}),
+		WithHTTPClient(V4, srv.Client()),
+		WithHTTPClient(V6, srv.Client()),
+		WithTimeout(3*time.Second),
+	)
+	res := d.Discover(t.Context())
+	if res.V4 == nil || res.V4.String() != "203.0.113.7" {
+		t.Fatalf("V4 = %v, want 203.0.113.7 (err: %v)", res.V4, res.V4Err)
+	}
+	if got, _ := gotMethod.Load().(string); got != "HEAD" {
+		t.Errorf("upstream Method = %q, want HEAD", got)
+	}
+	if bodyBytes.Load() != 0 {
+		t.Errorf("upstream wrote %d body bytes — HEAD should never reach the GET branch", bodyBytes.Load())
+	}
+}
+
 // TestAttempt_FollowsRedirectWithCookieJar simulates the alfabank
 // shape: first request answers 307 + Set-Cookie (antibot challenge),
 // second request (replayed with cookies) answers 404 + body

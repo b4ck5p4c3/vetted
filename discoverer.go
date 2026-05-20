@@ -465,10 +465,19 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, ep.readCap()))
-	if err != nil {
-		out.err = err
-		return
+	// HEAD never carries a body — skip the read so a server that
+	// sent Content-Length but no payload (correct for HEAD per
+	// RFC 9110, but trips io.ReadAll under surf's HTTP/2 transport
+	// with "unexpected EOF") doesn't fail the cycle. Cookie /
+	// header-only parsers don't read the body anyway, so passing
+	// an empty slice is semantically correct.
+	var body []byte
+	if ep.method() != "HEAD" {
+		body, err = io.ReadAll(io.LimitReader(resp.Body, ep.readCap()))
+		if err != nil {
+			out.err = err
+			return
+		}
 	}
 	candidate, err := ep.Parser.Parse(resp.Header, body)
 	if err != nil {

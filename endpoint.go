@@ -361,18 +361,26 @@ var DefaultEndpoints = []Endpoint{
 	{
 		// Live-verified: litres is fronted by DDoS-Guard, which
 		// injects a `__ddg9_=<client-ip>` Set-Cookie alongside
-		// `__ddg8_`/`__ddg10_`/`__ddg1_` siblings. The IP comes
-		// back in the HEADER, not the body — the Cookie parser
-		// reads it from Set-Cookie without touching the body.
-		// Body is still downloaded (557 KB landing, capped at
-		// the Discoverer's 256 KB) because we don't have a
-		// header-only optimisation yet; Cost is set to the
-		// effective cap, not the full body. If we add a HEAD or
-		// Range-request short-circuit later, drop Cost to ~500.
+		// `__ddg8_`/`__ddg10_`/`__ddg1_` siblings. The IP rides in
+		// the HEADER, not the body — so we send HEAD instead of GET
+		// and DDoS-Guard still echoes the cookie in the response
+		// headers (live-verified: identical __ddg9_ value on HEAD
+		// vs GET). Saves ~256 KB per cycle that this endpoint fires,
+		// which matters for the mobile-RU target where the cheap
+		// API tier often fails and litres pulls through.
+		//
+		// Cost set to CostSmall — the actual response is just
+		// headers (~600 B from this egress), but bumping above
+		// CostMinimal keeps litres out of the parallel API race
+		// where the cheap JSON endpoints belong. Litres is still
+		// effectively a fallback because its measured latency
+		// (~200ms + DDoS-Guard overhead) loses cleanly against
+		// the sub-100ms JSON endpoints.
 		Name:   "litres",
 		URL:    "https://www.litres.ru/",
 		Family: Any,
-		Cost:   256000,
+		Cost:   CostSmall,
+		Method: "HEAD",
 		Parser: Cookie("__ddg9_"),
 	},
 	{
