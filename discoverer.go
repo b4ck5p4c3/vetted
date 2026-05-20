@@ -363,20 +363,32 @@ func (d *Discoverer) runFamily(parent context.Context, fam Family) (net.IP, stri
 }
 
 // raceTier fans out parallel HTTP attempts across one cost tier
-// and returns the first successful one. Every attempt finishes
-// its span (success or failure) before this returns, so the
-// Tracer sees consistent telemetry per cycle.
+// and returns the first successful one. The tier shares a child
+// context that gets cancelled as soon as a winner lands — losers'
+// in-flight HTTP requests then abort with context.Canceled instead
+// of running to completion. Every attempt still finishes its span
+// (success or canceled) before this returns, so the Tracer sees
+// consistent telemetry per cycle.
+//
+// Mobile RU networks are the primary target: under filtering, the
+// cheap API tier routinely contains one fast responder and several
+// stalled / 5-second-timeout endpoints. Without the cancel-on-win
+// short-circuit, every cycle waited for the slowest tier member
+// even though the IP was already in hand — turning a sub-second
+// resolution into a multi-second one.
 func (d *Discoverer) raceTier(parent context.Context, fam Family, httpClient *http.Client, tier []Endpoint) (net.IP, string, []Attempt, error) {
 	type result struct {
-		ip   net.IP
-		src  string
-		err  error
-		att  Attempt
+		ip  net.IP
+		src string
+		err error
+		att Attempt
 	}
+	tierCtx, cancel := context.WithCancel(parent)
+	defer cancel()
 	out := make(chan result, len(tier))
 	for _, ep := range tier {
 		go func(ep Endpoint) {
-			out <- d.attempt(parent, fam, httpClient, ep)
+			out <- d.attempt(tierCtx, fam, httpClient, ep)
 		}(ep)
 	}
 	var atts []Attempt
@@ -389,6 +401,7 @@ func (d *Discoverer) raceTier(parent context.Context, fam Family, httpClient *ht
 		if r.err == nil && winnerIP == nil {
 			winnerIP = r.ip
 			winnerSrc = r.src
+			cancel()
 		}
 		if r.err != nil {
 			lastErr = r.err

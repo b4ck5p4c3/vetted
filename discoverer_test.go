@@ -156,6 +156,78 @@ func TestDiscover_RaceFirstResponderWins(t *testing.T) {
 	}
 }
 
+// TestRaceTier_CancelsLosersOnFirstWin pins the mobile-RU perf
+// property: as soon as one tier member returns a valid IP, the
+// other in-flight requests get context-cancelled and the cycle
+// returns instead of waiting for the slowest endpoint. Before
+// this short-circuit, every Discover call paid the cost of the
+// slowest tier member regardless of when the winner finished.
+//
+// The test wires a fast endpoint that responds immediately and a
+// slow endpoint that would otherwise sleep ~2s, then asserts the
+// cycle completes far below the 2s sleep budget AND that the
+// slow Attempt is recorded with FailReason="canceled" so tracer
+// dashboards still see what happened.
+func TestRaceTier_CancelsLosersOnFirstWin(t *testing.T) {
+	const slowSleep = 2 * time.Second
+	var slowReached atomic.Bool
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ip":"203.0.113.1"}`)
+	}))
+	t.Cleanup(fast.Close)
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slowReached.Store(true)
+		select {
+		case <-time.After(slowSleep):
+			fmt.Fprint(w, `{"ip":"203.0.113.2"}`)
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(slow.Close)
+
+	// Family: V4 on both so the v6 race exits immediately with
+	// "no eligible endpoints" — otherwise the v6 race would still
+	// wait for both endpoints to return (family_mismatch never
+	// triggers the cancel-on-win path) and mask the v4 short-circuit.
+	d := New(
+		WithEndpoints(
+			Endpoint{Name: "slow", URL: slow.URL, Family: V4, Cost: CostMinimal, Parser: JSONKey("ip")},
+			Endpoint{Name: "fast", URL: fast.URL, Family: V4, Cost: CostMinimal, Parser: JSONKey("ip")},
+		),
+		WithHTTPClient(V4, fast.Client()),
+		WithHTTPClient(V6, fast.Client()),
+		WithTimeout(slowSleep+2*time.Second),
+	)
+
+	start := time.Now()
+	res := d.Discover(t.Context())
+	elapsed := time.Since(start)
+
+	if elapsed >= slowSleep {
+		t.Fatalf("Discover took %v, expected well under %v (cycle should not wait for slow loser)", elapsed, slowSleep)
+	}
+	if res.V4 == nil || res.V4.String() != "203.0.113.1" {
+		t.Fatalf("V4 = %v, want 203.0.113.1", res.V4)
+	}
+	if !slowReached.Load() {
+		t.Fatal("slow endpoint never received a request — race scaffolding broken")
+	}
+	var slowAtt *Attempt
+	for i := range res.Attempts {
+		a := &res.Attempts[i]
+		if a.Endpoint.Name == "slow" && a.Family == V4 {
+			slowAtt = a
+			break
+		}
+	}
+	if slowAtt == nil {
+		t.Fatal("no v4 Attempt recorded for slow endpoint — telemetry lost")
+	}
+	if slowAtt.FailReason != "canceled" {
+		t.Errorf("slow Attempt FailReason = %q, want canceled (err=%v)", slowAtt.FailReason, slowAtt.Err)
+	}
+}
+
 // TestDiscover_FallsThroughCheapTier verifies the discoverer fires
 // the next cost tier when every endpoint in the cheap tier fails.
 func TestDiscover_FallsThroughCheapTier(t *testing.T) {
