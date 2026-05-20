@@ -158,6 +158,76 @@ func TestDiscover_RaceFirstResponderWins(t *testing.T) {
 	}
 }
 
+// TestPriorityEndpoints_TriedBeforeDefaults verifies that a
+// WithPriorityEndpoints entry wins over a base endpoint even when the
+// base endpoint is cheaper and would otherwise be tried first. The
+// priority block precedes the whole base block regardless of Cost.
+func TestPriorityEndpoints_TriedBeforeDefaults(t *testing.T) {
+	var prioHit, baseHit atomic.Int64
+	prio := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		prioHit.Add(1)
+		fmt.Fprint(w, `{"ip":"203.0.113.1"}`)
+	}))
+	t.Cleanup(prio.Close)
+	base := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		baseHit.Add(1)
+		fmt.Fprint(w, `{"ip":"203.0.113.2"}`)
+	}))
+	t.Cleanup(base.Close)
+
+	d := New(
+		// Base endpoint is CHEAPER (CostMinimal) than the priority one
+		// (CostHigh) — yet priority must still win because the priority
+		// block is tried in full before the base block.
+		WithEndpoints(Endpoint{Name: "base", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: base.URL, Parser: JSONKey("ip")}}),
+		WithPriorityEndpoints(Endpoint{Name: "prio", Family: V4, Cost: CostHigh, Prober: &HTTPProbe{URL: prio.URL, Parser: JSONKey("ip")}}),
+		WithHTTPClient(V4, prio.Client()),
+		WithHTTPClient(V6, prio.Client()),
+		WithTimeout(3*time.Second),
+	)
+	res := d.Discover(t.Context())
+	if res.V4 == nil || res.V4.String() != "203.0.113.1" {
+		t.Fatalf("V4 = %v, want 203.0.113.1 from priority (err: %v)", res.V4, res.V4Err)
+	}
+	if res.V4Source != "prio" {
+		t.Errorf("V4Source = %q, want prio", res.V4Source)
+	}
+	if prioHit.Load() == 0 {
+		t.Error("priority endpoint never hit")
+	}
+	if baseHit.Load() != 0 {
+		t.Errorf("base endpoint hit %d times — should not run when priority succeeds", baseHit.Load())
+	}
+}
+
+// TestPriorityEndpoints_FallThroughToDefaults verifies the base set
+// still runs when every priority endpoint fails.
+func TestPriorityEndpoints_FallThroughToDefaults(t *testing.T) {
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "no", http.StatusInternalServerError)
+	}))
+	t.Cleanup(broken.Close)
+	base := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ip":"203.0.113.42"}`)
+	}))
+	t.Cleanup(base.Close)
+
+	d := New(
+		WithEndpoints(Endpoint{Name: "base", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: base.URL, Parser: JSONKey("ip")}}),
+		WithPriorityEndpoints(Endpoint{Name: "prio-broken", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: broken.URL, Parser: JSONKey("ip")}}),
+		WithHTTPClient(V4, base.Client()),
+		WithHTTPClient(V6, base.Client()),
+		WithTimeout(3*time.Second),
+	)
+	res := d.Discover(t.Context())
+	if res.V4 == nil || res.V4.String() != "203.0.113.42" {
+		t.Fatalf("V4 = %v, want 203.0.113.42 from base fallback (err: %v)", res.V4, res.V4Err)
+	}
+	if res.V4Source != "base" {
+		t.Errorf("V4Source = %q, want base", res.V4Source)
+	}
+}
+
 // TestRaceTier_CancelsLosersOnFirstWin pins the mobile-RU perf
 // property: as soon as one tier member returns a valid IP, the
 // other in-flight requests get context-cancelled and the cycle

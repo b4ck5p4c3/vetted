@@ -33,6 +33,7 @@ const (
 // Construct with New(opts...). The zero value is NOT useful.
 type Discoverer struct {
 	endpoints []Endpoint
+	priority  []Endpoint
 	maxCost   Cost
 	timeout   time.Duration
 	tracer    Tracer
@@ -57,9 +58,25 @@ func WithEndpoints(eps ...Endpoint) Option {
 	return func(d *Discoverer) { d.endpoints = eps }
 }
 
+// WithPriorityEndpoints registers endpoints that are tried BEFORE
+// the base set (DefaultEndpoints, or whatever WithEndpoints supplied)
+// in every cycle. The whole priority block precedes the whole base
+// block, so a caller's preferred probes — typically STUN/TURN servers
+// it already trusts or has fetched from a live config — always win
+// over the built-in defaults, which become a fallback. Priority
+// endpoints are cost-tiered among themselves (cheap-first, same-cost
+// race in parallel) and each is Validate()d at New() like the rest.
+//
+// Composes with WithEndpoints: WithEndpoints replaces the base set,
+// WithPriorityEndpoints layers a preferred set on top of it.
+func WithPriorityEndpoints(eps ...Endpoint) Option {
+	return func(d *Discoverer) { d.priority = eps }
+}
+
 // WithMaxCost caps endpoint eligibility: only those with Cost <=
 // max are considered. Pass 0 to allow every endpoint regardless
-// of cost (the default).
+// of cost (the default). Applies to priority and base endpoints
+// alike.
 func WithMaxCost(max Cost) Option {
 	return func(d *Discoverer) { d.maxCost = max }
 }
@@ -115,6 +132,11 @@ func New(opts ...Option) *Discoverer {
 	}
 	for _, o := range opts {
 		o(d)
+	}
+	for _, ep := range d.priority {
+		if err := ep.Validate(); err != nil {
+			panic(err)
+		}
 	}
 	for _, ep := range d.endpoints {
 		if err := ep.Validate(); err != nil {
@@ -471,18 +493,29 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 	return
 }
 
-// eligibleTiers buckets the configured endpoints by Cost so the
-// caller can iterate cheap-to-expensive. Returns a slice of tiers
-// where each inner slice holds endpoints with the same Cost.
-// Endpoints whose family doesn't match (and aren't Any) are
-// skipped, as are endpoints over maxCost.
+// eligibleTiers returns the cost tiers to try, in order. Priority
+// endpoints (WithPriorityEndpoints) come first as their own
+// cost-ordered block, then the base set (DefaultEndpoints or
+// WithEndpoints). The whole priority block precedes the whole base
+// block: a caller-supplied endpoint is always tried before any
+// default, falling through to defaults only if every priority
+// endpoint failed. Within each block, same-Cost endpoints share a
+// tier and race in parallel.
 func (d *Discoverer) eligibleTiers(fam Family) [][]Endpoint {
+	tiers := costTiers(d.priority, fam, d.maxCost)
+	return append(tiers, costTiers(d.endpoints, fam, d.maxCost)...)
+}
+
+// costTiers buckets one endpoint list by Cost, ascending. Endpoints
+// whose family doesn't match (and aren't Any) are skipped, as are
+// endpoints over maxCost (when maxCost > 0).
+func costTiers(eps []Endpoint, fam Family, maxCost Cost) [][]Endpoint {
 	var picked []Endpoint
-	for _, ep := range d.endpoints {
+	for _, ep := range eps {
 		if ep.Family != fam && ep.Family != Any {
 			continue
 		}
-		if d.maxCost > 0 && ep.Cost > d.maxCost {
+		if maxCost > 0 && ep.Cost > maxCost {
 			continue
 		}
 		picked = append(picked, ep)

@@ -121,6 +121,13 @@ func (e Endpoint) Validate() error {
 	return e.Prober.Validate(e.Name)
 }
 
+// vkSTUN builds one entry of the VK STUN fallback pool: a v4
+// STUN-over-TCP probe at Cost 100 (just above the primary CostMinimal
+// tier). See the pool comment in DefaultEndpoints.
+func vkSTUN(name, addr string) Endpoint {
+	return Endpoint{Name: name, Family: V4, Cost: 100, Prober: &STUNProbe{Addr: addr}}
+}
+
 // DefaultEndpoints is the curated list of "RU allowlist" probes.
 // Two physical tiers:
 //
@@ -193,17 +200,33 @@ var DefaultEndpoints = []Endpoint{
 	{
 		// STUN-over-TCP to Yandex's RTC STUN. Live-verified from both
 		// foreign and Beeline-LTE egress: returns the reflexive
-		// public IP in XOR-MAPPED-ADDRESS. The ONLY STUN server found
-		// reachable from RU mobile — UDP STUN is dropped wholesale by
-		// the carrier (only UDP/53 passes), so transport is TCP, and
-		// stun.yandex.ru / vk / mail / google / okcdn all fail. Unlike
-		// the HTTP probes this one does not depend on egress direction
-		// (works in-RU and abroad), making it a stable backstop.
+		// public IP in XOR-MAPPED-ADDRESS. Transport is TCP because RU
+		// mobile carriers drop outbound UDP to STUN ports wholesale
+		// (only UDP/53 passes); stun.yandex.ru / google / okcdn fail
+		// entirely. Unlike the HTTP probes this does not depend on
+		// egress direction (works in-RU and abroad) — the primary
+		// STUN probe and a stable backstop for the HTTP tier.
 		Name:   "yandex-stun",
 		Family: Any,
 		Cost:   CostMinimal,
 		Prober: &STUNProbe{Addr: "stun.rtc.yandex.net:3478"},
 	},
+	// VK STUN pool (AS47764, VK-AS). All six live-verified answering
+	// STUN over TCP on :19302 from Beeline LTE, returning the correct
+	// mobile reflexive IP; UDP times out (carrier). Cost 100 puts them
+	// in a fallback tier just above the primary CostMinimal tier — they
+	// fire only if every primary probe (including yandex-stun) failed,
+	// before the expensive HTML scrapers, and race among themselves.
+	// IP literals, not hostnames: VK has no published STUN hostname and
+	// may rotate these addresses, so treat the set as best-effort and
+	// re-verify with the live smoke test if STUN coverage regresses.
+	// Family V4 — these are v4 literals; a v6 race skips them.
+	vkSTUN("vk-stun-1", "91.231.135.136:19302"),
+	vkSTUN("vk-stun-2", "95.163.34.130:19302"),
+	vkSTUN("vk-stun-3", "90.156.236.100:19302"),
+	vkSTUN("vk-stun-4", "91.231.135.153:19302"),
+	vkSTUN("vk-stun-5", "193.203.43.14:19302"),
+	vkSTUN("vk-stun-6", "193.203.43.39:19302"),
 	{
 		// Live-verified: /api/v2/geo-facade/geo/ip returns HTTP 404
 		// with `{"status":"NOT_FOUND","message":"Город не найден,

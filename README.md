@@ -36,6 +36,21 @@ d.Trigger()
 res := d.Latest()
 ```
 
+Pass your own preferred probes (tried before the built-in defaults,
+which become a fallback) — e.g. STUN servers you trust or fetched
+from a live config:
+
+```go
+d := vetted.New(
+    vetted.WithPriorityEndpoints(
+        vetted.Endpoint{
+            Name: "my-stun", Family: vetted.Any, Cost: vetted.CostMinimal,
+            Prober: &vetted.STUNProbe{Addr: "stun.example.ru:3478"}, // TCP
+        },
+    ),
+)
+```
+
 ## Design
 
 - **Cost-based selection.** Each `Endpoint` carries a `Cost`
@@ -74,9 +89,16 @@ res := d.Latest()
   XOR-MAPPED-ADDRESS. Transport is TCP, not UDP: RU mobile carriers
   (measured on Beeline LTE) drop outbound UDP to STUN ports while
   passing TCP, so UDP STUN never answers. `stun.rtc.yandex.net:3478`
-  is the one reachable RU STUN server and, unlike the HTTP probes, is
-  egress-independent (works in-RU and abroad) — the most reliable
-  backstop, measured ~1.1s on Beeline LTE.
+  (primary) and the six VK STUN IPs on `:19302` (AS47764, fallback
+  pool) answer over TCP and are egress-independent (work in-RU and
+  abroad) — the most reliable backstop, measured ~1.1s on Beeline LTE.
+- **Priority endpoints.** `WithPriorityEndpoints(...)` registers
+  probes tried *before* the whole default/base set every cycle — the
+  caller's preferred STUN/TURN servers (e.g. ones fetched from a live
+  call config) win over the built-in defaults, which become a
+  fallback. The priority block is cost-tiered among itself and
+  precedes the base block regardless of Cost. Composes with
+  `WithEndpoints` (which replaces the base set).
 - **Pluggable tracer.** `Tracer` is a small interface
   (CycleStart/End, AttemptStart/End) with a `NoopTracer` default.
   Sentry / OpenTelemetry adapters live in the calling code, not
@@ -102,6 +124,7 @@ API endpoints (`CostMinimal`, race in parallel):
 | reg-speedtest    | `speedtest.reg.ru/detect_ip_info`     | `JSONKey("ip")`        | `{"ip":"...","success":true}`     |
 | start-proxycheck | `api.start.ru/account/proxycheck`     | `JSONKey("ip")`        | apikey query param baked into URL |
 | yandex-stun      | `stun.rtc.yandex.net:3478`            | `STUNProbe` (TCP)      | STUN Binding over TCP; egress-independent (works in-RU and abroad); fastest reliable probe (~1.1s on Beeline LTE). UDP STUN is dropped by RU mobile carriers — TCP only |
+| vk-stun-1..6     | `{91.231.135.136, 95.163.34.130, 90.156.236.100, 91.231.135.153, 193.203.43.14, 193.203.43.39}:19302` | `STUNProbe` (TCP) | VK STUN pool (AS47764); `Cost: 100` fallback tier above the primary one — fires as a 6-way race only if every primary probe (incl. yandex-stun) failed. All live-verified over TCP/19302 from Beeline LTE; UDP blocked. IP literals (no published hostname) — may rotate |
 | alfabank         | `alfabank.ru/api/v2/geo-facade/geo/ip`| `Regex(IP X.X.X.X)`    | 404 JSON `"по IP <ip> нет информации"` (Russian message); ServicePipe one-hop 307+cookie antibot; `AcceptStatus: [200, 404]`; needs HTML `Accept` header. parser_miss from RU mobile (response shape differs) |
 | yandex-v4        | `ipv4-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v4-only host                      |
 | yandex-v6        | `ipv6-internet.yandex.net/api/v0/ip`  | `JSONQuoted()`         | v6-only host                      |
@@ -136,12 +159,13 @@ Removed during verification:
   behaviour — it is the one-hop ServicePipe replay covered by the
   `alfabank` entry above. Earlier removal commentary applied to the
   detect_ip variant only.
-- **STUN: everything except `stun.rtc.yandex.net`** — measured from
-  Beeline LTE (USB-tethered Linux host, mobile egress). UDP STUN is
-  dropped wholesale by the carrier (only UDP/53 passes), so
-  `stun.l.google.com`, `stun.yandex.ru`, `stun.vk.com`, `stun.mail.ru`
-  all time out on UDP. Over TCP only `stun.rtc.yandex.net:3478`
-  answered. The OK.ru / okcdn WebRTC hosts (`videowebrtc.okcdn.ru`,
+- **STUN over UDP, and several STUN hostnames** — measured from
+  Beeline LTE (USB-tethered host, mobile egress). UDP STUN is dropped
+  wholesale by the carrier (only UDP/53 passes), so every STUN server
+  times out on UDP — transport must be TCP. Over TCP,
+  `stun.yandex.ru:3478` and `stun.l.google.com:19302` do not answer;
+  only `stun.rtc.yandex.net:3478` and the six VK `:19302` IPs do
+  (both kept). The OK.ru / okcdn WebRTC hosts (`videowebrtc.okcdn.ru`,
   `calls.okcdn.ru`, the rotating `maxvdNNN.okcdn.ru` pool) resolve but
   do not answer STUN on 3478/5349; their `:443` accepts TCP then drops
   raw STUN bytes (TLS-fronted TURN under auth, not open STUN). Not

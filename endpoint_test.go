@@ -88,6 +88,33 @@ func TestDefaultEndpoints_HasSTUN(t *testing.T) {
 	t.Fatal("no STUNProbe in DefaultEndpoints")
 }
 
+// TestDefaultEndpoints_VKSTUNPool guards the VK STUN fallback pool:
+// six v4 STUN-over-TCP probes on :19302, all in a single Cost tier
+// above the primary CostMinimal tier so they fire as a group only
+// after the primary probes fail.
+func TestDefaultEndpoints_VKSTUNPool(t *testing.T) {
+	var n int
+	for _, ep := range DefaultEndpoints {
+		s, ok := ep.Prober.(*STUNProbe)
+		if !ok || !strings.HasPrefix(ep.Name, "vk-stun-") {
+			continue
+		}
+		n++
+		if ep.Family != V4 {
+			t.Errorf("%s Family = %q, want V4", ep.Name, ep.Family)
+		}
+		if ep.Cost != 100 {
+			t.Errorf("%s Cost = %d, want 100 (fallback tier above CostMinimal)", ep.Name, ep.Cost)
+		}
+		if !strings.HasSuffix(s.Addr, ":19302") {
+			t.Errorf("%s Addr = %q, want :19302", ep.Name, s.Addr)
+		}
+	}
+	if n != 6 {
+		t.Errorf("VK STUN pool has %d entries, want 6", n)
+	}
+}
+
 // TestAttempt_OptionalFromRidesThroughAttempt pins the operator
 // contract: when an endpoint sets OptionalFrom, the same string is
 // reachable via Attempt.Endpoint.OptionalFrom. Dashboards depend on
