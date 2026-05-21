@@ -125,6 +125,7 @@ func TestDefaultEndpoints_FilteredReachable(t *testing.T) {
 		"qms": true, "rt-speedtest": true, "start-proxycheck": true,
 		"yandex-stun": true, "mail-ip": true, "yandex-internet-v4": true,
 		"mail-speedtest": true, "ivi": true, "wildberries": true,
+		"avito":     true,
 		"vk-stun-1": true, "vk-stun-2": true, "vk-stun-3": true,
 		"vk-stun-4": true, "vk-stun-5": true, "vk-stun-6": true,
 	}
@@ -132,7 +133,7 @@ func TestDefaultEndpoints_FilteredReachable(t *testing.T) {
 	// IP echoed only from foreign / antibot state.
 	wantNotReachable := map[string]bool{
 		"ipinfo": true, "reg-speedtest": true, "yandex-v4": true,
-		"alfabank": true, "litres": true, "tbank": true, "avito": true,
+		"alfabank": true, "litres": true, "tbank": true,
 		"2gis-antibot": true, "lamoda-vpn-error": true,
 		"lamoda-information-get": true, "lamoda-topmenu-flexible": true,
 	}

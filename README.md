@@ -141,7 +141,7 @@ exception at `CostSmall` because HEAD strips its body to ~600 B):
 | mail-speedtest          | `speedtest.mail.ru/`                           | `Regex("IP: ...")`         | 6900    | small landing                                                                                                                                                    |
 | wildberries             | `www.wildberries.ru/`                          | `HTMLAttr("data-req-ip")`  | 1600    | HTTP **498** WAF antibot status carries the IP in `data-req-ip="..."`; `AcceptStatus: [200, 498]`. Live-verified `ok` at ~350ms on Beeline LTE (filtered). Foreign egress is 451 with no IP |
 | ivi                     | `www.ivi.tv/`                                  | `JSONKey("ip")`            | 300000  | 748 KB landing; single `"ip":"..."` at byte ~266 K — `MaxBytes: 300_000` to reach it                                                                             |
-| avito                   | `www.avito.ru/`                                | `JSONKey("ip")`            | 1000000 | landing's `"ip":"..."` offset is highly variable (measured 958 K then 3.19 MB) — `MaxBytes: 1_000_000` catches the early-offset variant only; large/late-offset pages parser_miss. Not worth a multi-MB cap on mobile |
+| avito                   | `www.avito.ru/`                                | `JSONKey("ip")`            | 4000000 | RU mobile: 200, `"ip":"..."` near the tail of a 2.8–3.3 MB body (offset varies run-to-run, measured 2.76 M / 3.28 M). `MaxBytes: 4_000_000` with margin over the largest body seen. Foreign: 403 antibot, no IP. Resolves under filtering but ~6–14 s + multiple MB — last-resort backstop, callers drop it with `WithMaxCost` |
 | tbank                   | `www.tbank.ru`                                 | `JSONKey("remoteAddress")` | 1770000 | IP sits at byte ~255 KB, just inside the 256 KB response cap                                                                                                     |
 | litres                  | `www.litres.ru/`                               | `Cookie("__ddg9_")`        | 500     | DDoS-Guard echoes client IP in `__ddg9_` Set-Cookie header; uses `Method: "HEAD"` so body is never transferred (~600 B headers per cycle). Sometimes drops the `__ddg9_` cookie on rate-limited requests — soft fail, falls through to next endpoint |
 | lamoda-vpn-error        | `www.lamoda.ru/api/v1/recommendations/section` | `JSONKey("ip")`            | 194     | 403 with `{"code":10403,"data":{"ip":"..."}}` — `AcceptStatus: [200, 403]`. Foreign/VPN egress only — 307-loops from domestic RU IPs                             |
@@ -203,10 +203,11 @@ for), measured on Beeline LTE. A `FilteredReachable` endpoint failing
 under filtering is a true regression worth alerting on; an unmarked
 one failing there is expected. Currently marked: `qms`, `rt-speedtest`,
 `start-proxycheck`, `yandex-stun`, `vk-stun-1..6`, `mail-ip`,
-`yandex-internet-v4`, `mail-speedtest`, `ivi`, `wildberries`. NOT
-marked (work only unfiltered, or echo the IP only from foreign /
-antibot state): `ipinfo`, `reg-speedtest`, `yandex-v4`, `alfabank`,
-`litres`, `tbank`, `avito`, `2gis-antibot`, the lamoda probes.
+`yandex-internet-v4`, `mail-speedtest`, `ivi`, `wildberries`, `avito`
+(the last two only after the 498 / 4 MB fixes below). NOT marked
+(work only unfiltered, or echo the IP only from foreign / antibot
+state): `ipinfo`, `reg-speedtest`, `yandex-v4`, `alfabank`, `litres`,
+`tbank`, `2gis-antibot`, the lamoda probes.
 
 ## Live smoke test
 

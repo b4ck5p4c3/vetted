@@ -425,21 +425,31 @@ var DefaultEndpoints = []Endpoint{
 		Prober: &HTTPProbe{URL: "https://www.tbank.ru", Parser: JSONKey("remoteAddress")},
 	},
 	{
-		// Live-verified from both foreign and domestic-RU egress.
-		// Domestic RU: HTTP 200, 985 KB landing, IP near byte ~958 K
-		// — needs MaxBytes ~1_000_000 to reach. Foreign egress: HTTP
-		// 403, 27 KB antibot interstitial, no IP echo → parser_miss.
-		// Cost is the full 1_000_000 B on purpose: callers cap
-		// eligibility with WithMaxCost; any cap < 1_000_000 drops it.
+		// Re-measured from two egresses (2026-05):
+		//   - Foreign (this dev host): HTTP 403, 27 KB antibot
+		//     interstitial, no IP echo at all → parser_miss.
+		//   - Beeline LTE: HTTP 200, but the page is 2.8–3.3 MB and
+		//     the `"ip":"..."` token sits near the TAIL (measured at
+		//     byte 2.76 MB and 3.28 MB on two runs; body 2.79 MB and
+		//     3.31 MB). Offset is highly variable run-to-run.
+		// So MaxBytes must be large enough to pull almost the whole
+		// body. Set to 4 MB — comfortable margin over the largest
+		// observed 3.31 MB body, with room for growth. Cost matches
+		// MaxBytes (the bytes actually pulled): this is by far the
+		// most expensive endpoint and fires last; callers on metered
+		// links drop it with WithMaxCost. It does resolve under RU
+		// filtering (hence FilteredReachable) but at ~6–14 s and
+		// multiple MB — effectively a last-resort backstop.
 		Name:   "avito",
 		Family: Any,
-		Cost:   1_000_000,
+		Cost:   4_000_000,
 		Prober: &HTTPProbe{
 			URL:      "https://www.avito.ru/",
 			Parser:   JSONKey("ip"),
-			MaxBytes: 1_000_000,
+			MaxBytes: 4_000_000,
 		},
-		OptionalFrom: "foreign egress",
+		OptionalFrom:      "foreign egress",
+		FilteredReachable: true,
 	},
 	{
 		// Live-verified: 748801 B body with a single `"ip":"..."`
