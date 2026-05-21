@@ -115,6 +115,37 @@ func TestDefaultEndpoints_VKSTUNPool(t *testing.T) {
 	}
 }
 
+// TestDefaultEndpoints_FilteredReachable pins the verified
+// filtered-state ("БС") working set: the endpoints that resolved an
+// IP from Beeline LTE with filtering on. Guards against silently
+// marking an egress-only / generic endpoint as filtered-reachable
+// (false positive) or dropping a known-good one (false negative).
+func TestDefaultEndpoints_FilteredReachable(t *testing.T) {
+	wantReachable := map[string]bool{
+		"qms": true, "rt-speedtest": true, "start-proxycheck": true,
+		"yandex-stun": true, "mail-ip": true, "yandex-internet-v4": true,
+		"mail-speedtest": true, "ivi": true, "wildberries": true,
+		"vk-stun-1": true, "vk-stun-2": true, "vk-stun-3": true,
+		"vk-stun-4": true, "vk-stun-5": true, "vk-stun-6": true,
+	}
+	// These must stay UNMARKED: generic provider, unfiltered-only, or
+	// IP echoed only from foreign / antibot state.
+	wantNotReachable := map[string]bool{
+		"ipinfo": true, "reg-speedtest": true, "yandex-v4": true,
+		"alfabank": true, "litres": true, "tbank": true, "avito": true,
+		"2gis-antibot": true, "lamoda-vpn-error": true,
+		"lamoda-information-get": true, "lamoda-topmenu-flexible": true,
+	}
+	for _, ep := range DefaultEndpoints {
+		if wantReachable[ep.Name] && !ep.FilteredReachable {
+			t.Errorf("%s: FilteredReachable=false, want true (verified working under filtering)", ep.Name)
+		}
+		if wantNotReachable[ep.Name] && ep.FilteredReachable {
+			t.Errorf("%s: FilteredReachable=true, want false (not verified under filtering)", ep.Name)
+		}
+	}
+}
+
 // TestAttempt_OptionalFromRidesThroughAttempt pins the operator
 // contract: when an endpoint sets OptionalFrom, the same string is
 // reachable via Attempt.Endpoint.OptionalFrom. Dashboards depend on

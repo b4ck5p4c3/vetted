@@ -84,17 +84,21 @@ func TestLive_AllDefaultEndpoints(t *testing.T) {
 	var b strings.Builder
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "live endpoint matrix (current egress):")
-	fmt.Fprintln(&b, "name                          v4-status      v4-dur    v6-status      v6-dur    optional-from")
+	fmt.Fprintln(&b, "name                          v4-status      v4-dur    v6-status      v6-dur    filtered-ok  optional-from")
 	for _, ep := range DefaultEndpoints {
 		o := results[ep.Name]
 		if o == nil {
 			continue
 		}
-		fmt.Fprintf(&b, "%-30s%-15s%-10s%-15s%-10s%s\n",
+		filtered := ""
+		if ep.FilteredReachable {
+			filtered = "yes"
+		}
+		fmt.Fprintf(&b, "%-30s%-15s%-10s%-15s%-10s%-13s%s\n",
 			ep.Name,
 			o.v4Status, o.v4Dur.Round(time.Millisecond),
 			o.v6Status, o.v6Dur.Round(time.Millisecond),
-			ep.OptionalFrom,
+			filtered, ep.OptionalFrom,
 		)
 	}
 	t.Log(b.String())

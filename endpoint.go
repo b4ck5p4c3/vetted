@@ -101,6 +101,25 @@ type Endpoint struct {
 	// fail every cycle — that is the documented behaviour, not a
 	// regression.
 	OptionalFrom string
+
+	// FilteredReachable marks endpoints live-verified to resolve from
+	// inside the RU mobile segment WITH filtering active (the "БС"
+	// state — what this library exists for). It is the inverse signal
+	// to OptionalFrom: OptionalFrom says "expected to fail from this
+	// egress", FilteredReachable says "confirmed to work under
+	// filtering". The library does not act on it (the cost-tier race
+	// already prefers whatever responds) — it documents the verified
+	// filtered-state working set and rides through to the Tracer via
+	// Attempt.Endpoint so operators can tell a true regression (a
+	// FilteredReachable endpoint failing under filtering) from an
+	// endpoint that was never expected to work in that state.
+	//
+	// Set from the live matrix measured on Beeline LTE with filtering
+	// on; re-confirm with the //go:build live smoke test. Endpoints
+	// that only work unfiltered (generic providers like ipinfo) or
+	// only echo the IP from foreign egress (alfabank 404, 2gis/avito
+	// antibot) are deliberately NOT marked.
+	FilteredReachable bool
 }
 
 // Validate returns an error if the endpoint config is incomplete.
@@ -125,7 +144,7 @@ func (e Endpoint) Validate() error {
 // STUN-over-TCP probe at Cost 100 (just above the primary CostMinimal
 // tier). See the pool comment in DefaultEndpoints.
 func vkSTUN(name, addr string) Endpoint {
-	return Endpoint{Name: name, Family: V4, Cost: 100, Prober: &STUNProbe{Addr: addr}}
+	return Endpoint{Name: name, Family: V4, Cost: 100, Prober: &STUNProbe{Addr: addr}, FilteredReachable: true}
 }
 
 // DefaultEndpoints is the curated list of "RU allowlist" probes.
@@ -157,6 +176,7 @@ var DefaultEndpoints = []Endpoint{
 			Headers: map[string]string{"X-Api-Key": "c2852614b821db79e99218cce8d32b3d"},
 			Parser:  JSONKey("ip"),
 		},
+		FilteredReachable: true,
 	},
 	{
 		// Live-verified: returns `{"ip":"..."}` (21 bytes) with the
@@ -169,6 +189,7 @@ var DefaultEndpoints = []Endpoint{
 			Headers: map[string]string{"X-Api-Key": "f85f12b942ab0a8818eb66d64b244ee5"},
 			Parser:  JSONKey("ip"),
 		},
+		FilteredReachable: true,
 	},
 	{
 		Name:   "ipinfo",
@@ -196,6 +217,7 @@ var DefaultEndpoints = []Endpoint{
 			URL:    "https://api.start.ru/account/proxycheck?apikey=a20b12b279f744f2b3c7b5c5400c4eb5",
 			Parser: JSONKey("ip"),
 		},
+		FilteredReachable: true,
 	},
 	{
 		// STUN-over-TCP to Yandex's RTC STUN. Live-verified from both
@@ -206,10 +228,11 @@ var DefaultEndpoints = []Endpoint{
 		// entirely. Unlike the HTTP probes this does not depend on
 		// egress direction (works in-RU and abroad) — the primary
 		// STUN probe and a stable backstop for the HTTP tier.
-		Name:   "yandex-stun",
-		Family: Any,
-		Cost:   CostMinimal,
-		Prober: &STUNProbe{Addr: "stun.rtc.yandex.net:3478"},
+		Name:              "yandex-stun",
+		Family:            Any,
+		Cost:              CostMinimal,
+		Prober:            &STUNProbe{Addr: "stun.rtc.yandex.net:3478"},
+		FilteredReachable: true,
 	},
 	// VK STUN pool (AS47764, VK-AS). All six live-verified answering
 	// STUN over TCP on :19302 from Beeline LTE, returning the correct
@@ -279,10 +302,11 @@ var DefaultEndpoints = []Endpoint{
 		// `(none)({"ipAddress": "...", "xForwardedFor": "(none)"})`
 		// — 65 bytes. JSONKey("ipAddress") matches inside the
 		// JSONP wrapper just like a plain JSON object.
-		Name:   "mail-ip",
-		Family: Any,
-		Cost:   CostMinimal,
-		Prober: &HTTPProbe{URL: "https://ip.mail.ru/ip.html", Parser: JSONKey("ipAddress")},
+		Name:              "mail-ip",
+		Family:            Any,
+		Cost:              CostMinimal,
+		Prober:            &HTTPProbe{URL: "https://ip.mail.ru/ip.html", Parser: JSONKey("ipAddress")},
+		FilteredReachable: true,
 	},
 
 	// ── Fall-through endpoints — Cost = measured response bytes ───
@@ -293,10 +317,11 @@ var DefaultEndpoints = []Endpoint{
 		// `"v4":"159.195.6.55"` (the actual IP, nested inside
 		// `"ip":{"v4":...,"v6":null}`). We parse `"v4"` for the V4
 		// race and split out a separate V6 entry below.
-		Name:   "yandex-internet-v4",
-		Family: V4,
-		Cost:   114200,
-		Prober: &HTTPProbe{URL: "https://yandex.ru/internet/", Parser: Regex(`"v4"\s*:\s*"((?:\d{1,3}\.){3}\d{1,3})"`)},
+		Name:              "yandex-internet-v4",
+		Family:            V4,
+		Cost:              114200,
+		Prober:            &HTTPProbe{URL: "https://yandex.ru/internet/", Parser: Regex(`"v4"\s*:\s*"((?:\d{1,3}\.){3}\d{1,3})"`)},
+		FilteredReachable: true,
 	},
 	{
 		// Same page; V6 race parses the `"v6":"..."` key from the
@@ -312,24 +337,27 @@ var DefaultEndpoints = []Endpoint{
 		// fragment `<p>IP: 1.2.3.4</p>` — match the literal prefix
 		// to avoid catching the unrelated `120.0.0.0` user-agent
 		// version that also appears in the page.
-		Name:   "mail-speedtest",
-		Family: Any,
-		Cost:   6900,
-		Prober: &HTTPProbe{URL: "https://speedtest.mail.ru/", Parser: Regex(`IP:\s*((?:\d{1,3}\.){3}\d{1,3})`)},
+		Name:              "mail-speedtest",
+		Family:            Any,
+		Cost:              6900,
+		Prober:            &HTTPProbe{URL: "https://speedtest.mail.ru/", Parser: Regex(`IP:\s*((?:\d{1,3}\.){3}\d{1,3})`)},
+		FilteredReachable: true,
 	},
 	{
-		// Live-verified: wildberries returns a small antibot-style
-		// landing (~1.6 KB on foreign egress, larger inside RU) and
-		// the requester IP sits in `data-req-ip="..."` on the root
-		// <html> element. From foreign IPs the page comes back HTTP
-		// 451 so the discoverer rejects it. Measured parser_miss from
-		// RU mobile too (landing shape differs) — so OptionalFrom is
-		// "foreign egress" but RU is not guaranteed either.
-		Name:         "wildberries",
-		Family:       Any,
-		Cost:         1600,
-		Prober:       &HTTPProbe{URL: "https://www.wildberries.ru/", Parser: HTMLAttr("data-req-ip")},
-		OptionalFrom: "foreign egress",
+		// Live-verified from Beeline LTE: wildberries answers HTTP
+		// 498 (a non-standard WAF antibot status) with a ~1.4 KB
+		// landing that carries the requester IP in `data-req-ip="..."`
+		// on the root <html> element. AcceptStatus opts 498 past the
+		// 2xx gate so the body is parsed — without it the IP-bearing
+		// 498 was rejected as non_2xx (the earlier "parser_miss / RU
+		// not guaranteed" note was this missing 498). From foreign
+		// egress the page is HTTP 451 with no IP, hence OptionalFrom.
+		Name:              "wildberries",
+		Family:            Any,
+		Cost:              1600,
+		Prober:            &HTTPProbe{URL: "https://www.wildberries.ru/", Parser: HTMLAttr("data-req-ip"), AcceptStatus: []int{200, 498}},
+		OptionalFrom:      "foreign egress",
+		FilteredReachable: true,
 	},
 	{
 		// Live-verified: litres is fronted by DDoS-Guard, which
@@ -418,10 +446,11 @@ var DefaultEndpoints = []Endpoint{
 		// token at byte offset 266202. MaxBytes=300_000 gives a
 		// ~33 KB margin above the IP position; Cost matches MaxBytes
 		// because that is the byte volume actually pulled.
-		Name:   "ivi",
-		Family: Any,
-		Cost:   300_000,
-		Prober: &HTTPProbe{URL: "https://www.ivi.tv/", Parser: JSONKey("ip"), MaxBytes: 300_000},
+		Name:              "ivi",
+		Family:            Any,
+		Cost:              300_000,
+		Prober:            &HTTPProbe{URL: "https://www.ivi.tv/", Parser: JSONKey("ip"), MaxBytes: 300_000},
+		FilteredReachable: true,
 	},
 	{
 		// Live-verified: POST {} to /api/v1/information/get returns
