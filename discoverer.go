@@ -34,6 +34,7 @@ const (
 type Discoverer struct {
 	endpoints []Endpoint
 	priority  []Endpoint
+	families  []Family
 	maxCost   Cost
 	timeout   time.Duration
 	tracer    Tracer
@@ -71,6 +72,36 @@ func WithEndpoints(eps ...Endpoint) Option {
 // WithPriorityEndpoints layers a preferred set on top of it.
 func WithPriorityEndpoints(eps ...Endpoint) Option {
 	return func(d *Discoverer) { d.priority = eps }
+}
+
+// WithFamilies restricts which IP families Discover races. The
+// default is both V4 and V6. Pass WithFamilies(V4) when the caller
+// knows the host has no IPv6 — the v6 race is then skipped entirely
+// (no goroutine, no wasted attempts, and crucially no v6-only-host
+// dial timeout), and Result.V6 / V6Err / v6 Attempts stay zero.
+// Any value other than V4 or V6 (e.g. Any) is ignored; if the
+// filtered set is empty the default (both) is kept.
+func WithFamilies(fams ...Family) Option {
+	return func(d *Discoverer) {
+		var set []Family
+		for _, f := range fams {
+			if (f == V4 || f == V6) && !containsFamily(set, f) {
+				set = append(set, f)
+			}
+		}
+		if len(set) > 0 {
+			d.families = set
+		}
+	}
+}
+
+func containsFamily(s []Family, f Family) bool {
+	for _, x := range s {
+		if x == f {
+			return true
+		}
+	}
+	return false
 }
 
 // WithMaxCost caps endpoint eligibility: only those with Cost <=
@@ -126,6 +157,7 @@ func WithHTTPClient(fam Family, c *http.Client) Option {
 func New(opts ...Option) *Discoverer {
 	d := &Discoverer{
 		endpoints: DefaultEndpoints,
+		families:  []Family{V4, V6},
 		timeout:   defaultTimeout,
 		tracer:    NoopTracer{},
 		trigger:   make(chan struct{}, 1),
@@ -244,10 +276,16 @@ type Attempt struct {
 	FailReason string
 }
 
-// Discover runs one v4 + v6 discovery cycle and returns the
-// outcome. Latest() reflects the same result after Discover
-// returns. Safe for concurrent calls; per-cycle context isolation
-// prevents v4 and v6 attempts from sharing cancellation state.
+// Discover runs one discovery cycle and returns the outcome. By
+// default it races v4 and v6 independently and in parallel; the set
+// of families is narrowed with WithFamilies (e.g. WithFamilies(V4)
+// when the caller knows the host has no v6, which skips the v6 race
+// entirely — no goroutine, no wasted attempts, no v6 timeout). A
+// family that isn't requested leaves its Result fields zero (V6 nil,
+// V6Err nil, no v6 Attempts). Latest() reflects the same result after
+// Discover returns. Safe for concurrent calls; per-cycle context
+// isolation prevents v4 and v6 attempts from sharing cancellation
+// state.
 func (d *Discoverer) Discover(ctx context.Context) Result {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
@@ -258,23 +296,22 @@ func (d *Discoverer) Discover(ctx context.Context) Result {
 	var mu sync.Mutex
 	res := Result{StartedAt: started}
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		ip, src, atts, err := d.runFamily(ctx, V4)
-		mu.Lock()
-		res.V4, res.V4Source, res.V4Err = ip, src, err
-		res.Attempts = append(res.Attempts, atts...)
-		mu.Unlock()
-	}()
-	go func() {
-		defer wg.Done()
-		ip, src, atts, err := d.runFamily(ctx, V6)
-		mu.Lock()
-		res.V6, res.V6Source, res.V6Err = ip, src, err
-		res.Attempts = append(res.Attempts, atts...)
-		mu.Unlock()
-	}()
+	for _, fam := range d.families {
+		wg.Add(1)
+		go func(fam Family) {
+			defer wg.Done()
+			ip, src, atts, err := d.runFamily(ctx, fam)
+			mu.Lock()
+			switch fam {
+			case V4:
+				res.V4, res.V4Source, res.V4Err = ip, src, err
+			case V6:
+				res.V6, res.V6Source, res.V6Err = ip, src, err
+			}
+			res.Attempts = append(res.Attempts, atts...)
+			mu.Unlock()
+		}(fam)
+	}
 	wg.Wait()
 
 	res.Duration = time.Since(started)

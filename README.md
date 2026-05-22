@@ -51,6 +51,14 @@ d := vetted.New(
 )
 ```
 
+If you know the host has no IPv6, skip the v6 race entirely — saves a
+cycle the v6-only-host dial timeout would otherwise dominate:
+
+```go
+d := vetted.New(vetted.WithFamilies(vetted.V4))
+res := d.Discover(ctx) // res.V6 stays nil, no v6 attempts
+```
+
 ## Design
 
 - **Cost-based selection.** Each `Endpoint` carries a `Cost`
@@ -69,10 +77,14 @@ d := vetted.New(
   headers (Cookie parser on litres) set `Method: "HEAD"`. The
   Discoverer skips the body read entirely, saving 256 KB per
   litres-firing cycle.
-- **V4 + V6 in parallel.** Two dialer-pinned HTTP clients run
-  independent races per family. A v4 result and v6 result land
-  on the scope as separate values; either or both may be unset
-  depending on host connectivity.
+- **V4 + V6 in parallel, independently.** Each requested family races
+  in its own goroutine with a dialer-pinned client; a v4 result and v6
+  result land as separate values, either or both possibly unset.
+  `WithFamilies(V4)` runs only the v4 race (the v6 goroutine never
+  spawns). Endpoint `Family` reflects real v6 capability from a
+  AAAA-record audit — a host with no AAAA is `V4`, so the v6 race only
+  runs the four genuinely v6-capable endpoints (yandex-stun,
+  wildberries, yandex-v6, yandex-internet-v6), not the whole list.
 - **Browser fingerprint.** Default HTTP clients use
   [enetx/surf](https://github.com/enetx/surf) with Chrome
   Impersonate — JA3/JA4 TLS fingerprint + matching User-Agent.

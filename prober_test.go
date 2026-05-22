@@ -19,7 +19,13 @@ import (
 // Returns the listener address. Closes itself via t.Cleanup.
 func fakeSTUNServer(t *testing.T, wantIP net.IP, wantPort uint16) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// Listen on the loopback of the family being tested so STUNProbe's
+	// tcp4/tcp6 dial (driven by the race family) reaches it.
+	listenAddr := "127.0.0.1:0"
+	if wantIP.To4() == nil {
+		listenAddr = "[::1]:0"
+	}
+	ln, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -44,17 +50,27 @@ func serveSTUN(conn net.Conn, ip net.IP, port uint16) {
 	}
 	// Echo back the transaction ID from the request (bytes 8..20).
 	txn := hdr[8:20]
-	v4 := ip.To4()
-	if v4 == nil {
-		return
-	}
 	// XOR-MAPPED-ADDRESS attribute value: reserved, family, x-port,
-	// x-address.
-	attrVal := make([]byte, 8)
-	attrVal[0] = 0
-	attrVal[1] = 0x01 // IPv4
-	binary.BigEndian.PutUint16(attrVal[2:], port^(magicCookie>>16))
-	binary.BigEndian.PutUint32(attrVal[4:], binary.BigEndian.Uint32(v4)^magicCookie)
+	// x-address. v4 → 4 address bytes XOR cookie; v6 → 16 bytes,
+	// first 4 XOR cookie, rest XOR transaction ID.
+	var attrVal []byte
+	if v4 := ip.To4(); v4 != nil {
+		attrVal = make([]byte, 8)
+		attrVal[1] = 0x01
+		binary.BigEndian.PutUint16(attrVal[2:], port^(magicCookie>>16))
+		binary.BigEndian.PutUint32(attrVal[4:], binary.BigEndian.Uint32(v4)^magicCookie)
+	} else {
+		v6 := ip.To16()
+		attrVal = make([]byte, 20)
+		attrVal[1] = 0x02
+		binary.BigEndian.PutUint16(attrVal[2:], port^(magicCookie>>16))
+		var mask [16]byte
+		binary.BigEndian.PutUint32(mask[0:], magicCookie)
+		copy(mask[4:], txn)
+		for i := 0; i < 16; i++ {
+			attrVal[4+i] = v6[i] ^ mask[i]
+		}
+	}
 
 	attr := make([]byte, 0, 4+len(attrVal))
 	var at [4]byte
@@ -86,6 +102,28 @@ func TestSTUNProbe_ParsesXORMappedAddress(t *testing.T) {
 	}
 	if res.HTTPStatus != 0 {
 		t.Errorf("HTTPStatus = %d, want 0 for STUN", res.HTTPStatus)
+	}
+}
+
+// TestSTUNProbe_ParsesV6XORMappedAddress covers the IPv6 path: the
+// low 96 bits of XOR-MAPPED-ADDRESS are un-masked with the request
+// transaction ID. yandex-stun (Family Any, AAAA present) relies on
+// this to answer the v6 race.
+func TestSTUNProbe_ParsesV6XORMappedAddress(t *testing.T) {
+	want := net.ParseIP("2001:db8::dead:beef")
+	addr := fakeSTUNServer(t, want, 50000)
+	p := &STUNProbe{Addr: addr}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	res, err := p.Probe(ctx, V6, nil)
+	if err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if res.IP == nil || !res.IP.Equal(want) {
+		t.Fatalf("IP = %v, want %v", res.IP, want)
+	}
+	if res.IP.To4() != nil {
+		t.Errorf("parsed v6 address %v reports as v4", res.IP)
 	}
 }
 

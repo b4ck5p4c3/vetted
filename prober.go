@@ -225,7 +225,7 @@ func (s *STUNProbe) Probe(ctx context.Context, fam Family, _ *http.Client) (Prob
 	if _, err := io.ReadFull(conn, body); err != nil {
 		return res, fmt.Errorf("stun: %w", err)
 	}
-	ip, err := stunMappedIP(body)
+	ip, err := stunMappedIP(body, req[8:20])
 	if err != nil {
 		return res, err
 	}
@@ -235,7 +235,9 @@ func (s *STUNProbe) Probe(ctx context.Context, fam Family, _ *http.Client) (Prob
 
 // stunMappedIP walks the STUN attributes and returns the address from
 // XOR-MAPPED-ADDRESS (preferred) or MAPPED-ADDRESS (legacy fallback).
-func stunMappedIP(body []byte) (net.IP, error) {
+// txn is the 12-byte request transaction ID, needed to un-mask the
+// low 96 bits of an IPv6 XOR-MAPPED-ADDRESS.
+func stunMappedIP(body, txn []byte) (net.IP, error) {
 	for len(body) >= 4 {
 		atyp := binary.BigEndian.Uint16(body[0:])
 		alen := int(binary.BigEndian.Uint16(body[2:]))
@@ -245,7 +247,7 @@ func stunMappedIP(body []byte) (net.IP, error) {
 		val := body[4 : 4+alen]
 		switch atyp {
 		case 0x0020: // XOR-MAPPED-ADDRESS
-			return parseXORMapped(val)
+			return parseXORMapped(val, txn)
 		case 0x0001: // MAPPED-ADDRESS
 			if ip := parseMapped(val); ip != nil {
 				return ip, nil
@@ -256,25 +258,49 @@ func stunMappedIP(body []byte) (net.IP, error) {
 	return nil, fmt.Errorf("stun: no mapped-address attribute")
 }
 
-func parseXORMapped(v []byte) (net.IP, error) {
-	if len(v) < 8 {
-		return nil, fmt.Errorf("stun: short xor-mapped-address")
+// parseXORMapped decodes XOR-MAPPED-ADDRESS for IPv4 (family 0x01) and
+// IPv6 (0x02). For v4 the 4 address bytes are XORed with the magic
+// cookie; for v6 the first 4 are XORed with the cookie and the
+// remaining 12 with the request transaction ID (RFC 5389 §15.2).
+func parseXORMapped(v, txn []byte) (net.IP, error) {
+	switch {
+	case len(v) >= 8 && v[1] == 0x01: // IPv4
+		ip := make([]byte, 4)
+		binary.BigEndian.PutUint32(ip, binary.BigEndian.Uint32(v[4:])^magicCookie)
+		return net.IP(ip), nil
+	case len(v) >= 20 && v[1] == 0x02: // IPv6
+		if len(txn) < 12 {
+			return nil, fmt.Errorf("stun: missing transaction id for v6")
+		}
+		var mask [16]byte
+		binary.BigEndian.PutUint32(mask[0:], magicCookie)
+		copy(mask[4:], txn)
+		ip := make([]byte, 16)
+		for i := 0; i < 16; i++ {
+			ip[i] = v[4+i] ^ mask[i]
+		}
+		return net.IP(ip), nil
+	default:
+		return nil, fmt.Errorf("stun: unsupported xor-mapped-address (len %d family %d)", len(v), addrFamily(v))
 	}
-	// Only IPv4 is handled: the reachable RU STUN server answers v4,
-	// and v6 XOR-MAPPED-ADDRESS needs the request transaction ID to
-	// un-mask the low 12 bytes, which this minimal client doesn't
-	// thread through. Reject v6 cleanly rather than guess.
-	if v[1] != 0x01 {
-		return nil, fmt.Errorf("stun: non-ipv4 address family %d", v[1])
+}
+
+func addrFamily(v []byte) byte {
+	if len(v) >= 2 {
+		return v[1]
 	}
-	var ip [4]byte
-	binary.BigEndian.PutUint32(ip[:], binary.BigEndian.Uint32(v[4:])^magicCookie)
-	return net.IP(ip[:]), nil
+	return 0
 }
 
 func parseMapped(v []byte) net.IP {
-	if len(v) < 8 || v[1] != 0x01 {
+	switch {
+	case len(v) >= 8 && v[1] == 0x01: // IPv4
+		return net.IPv4(v[4], v[5], v[6], v[7])
+	case len(v) >= 20 && v[1] == 0x02: // IPv6
+		ip := make([]byte, 16)
+		copy(ip, v[4:20])
+		return net.IP(ip)
+	default:
 		return nil
 	}
-	return net.IPv4(v[4], v[5], v[6], v[7])
 }

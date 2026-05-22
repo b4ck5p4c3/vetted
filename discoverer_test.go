@@ -158,6 +158,54 @@ func TestDiscover_RaceFirstResponderWins(t *testing.T) {
 	}
 }
 
+// TestWithFamilies_V4OnlySkipsV6Race verifies that WithFamilies(V4)
+// runs only the v4 race: the v6 race never spawns, so an Any endpoint
+// is hit once (v4) not twice, and Result.V6 / V6Err / v6 Attempts
+// stay zero. This is the "caller knows there's no v6" fast path —
+// it avoids the v6-only-host dial timeout that otherwise dominates a
+// cycle on a v4-only network.
+func TestWithFamilies_V4OnlySkipsV6Race(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, `{"ip":"203.0.113.5"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := New(
+		WithEndpoints(Endpoint{Name: "any", Family: Any, Cost: CostMinimal, Prober: &HTTPProbe{URL: srv.URL, Parser: JSONKey("ip")}}),
+		WithFamilies(V4),
+		WithHTTPClient(V4, srv.Client()),
+		WithHTTPClient(V6, srv.Client()),
+		WithTimeout(3*time.Second),
+	)
+	res := d.Discover(t.Context())
+	if res.V4 == nil || res.V4.String() != "203.0.113.5" {
+		t.Fatalf("V4 = %v, want 203.0.113.5", res.V4)
+	}
+	if res.V6 != nil || res.V6Err != nil {
+		t.Errorf("v6 should be untouched: V6=%v V6Err=%v", res.V6, res.V6Err)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("endpoint hit %d times, want 1 (v4 only, no v6 race)", hits.Load())
+	}
+	for _, a := range res.Attempts {
+		if a.Family == V6 {
+			t.Errorf("found a V6 attempt (%s) — v6 race should be skipped", a.Endpoint.Name)
+		}
+	}
+}
+
+// TestWithFamilies_EmptyKeepsDefault — passing no valid family (or
+// only Any) must not disable discovery; the default both-families
+// set is kept.
+func TestWithFamilies_EmptyKeepsDefault(t *testing.T) {
+	d := New(WithFamilies(Any))
+	if len(d.families) != 2 {
+		t.Fatalf("families = %v, want default [V4 V6] when no valid family given", d.families)
+	}
+}
+
 // TestPriorityEndpoints_TriedBeforeDefaults verifies that a
 // WithPriorityEndpoints entry wins over a base endpoint even when the
 // base endpoint is cheaper and would otherwise be tried first. The

@@ -165,11 +165,19 @@ func vkSTUN(name, addr string) Endpoint {
 // comments below and the README tables. The Discoverer re-sorts by
 // Cost at construction time so manual overrides still get correct
 // priority order.
+//
+// Family reflects real v6 capability, derived from a AAAA-record
+// audit: a host with no AAAA cannot answer over IPv6, so it is V4
+// (no point racing it in the v6 cycle). Only hosts with a AAAA are
+// Any/V6 — currently yandex-stun, wildberries (Any), yandex-v6 and
+// yandex-internet-v6 (V6). So the v6 race runs four endpoints, not
+// the whole list. Callers that know the host has no v6 skip the v6
+// race entirely with WithFamilies(V4).
 var DefaultEndpoints = []Endpoint{
 	// ── API endpoints — CostMinimal, race in parallel ────────────
 	{
 		Name:   "qms",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{
 			URL:     "https://www.qms.ru/api/asn_provider/ip",
@@ -182,7 +190,7 @@ var DefaultEndpoints = []Endpoint{
 		// Live-verified: returns `{"ip":"..."}` (21 bytes) with the
 		// same /api/asn_provider/ip shape as qms.
 		Name:   "rt-speedtest",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{
 			URL:     "https://speedtest.rt.ru/api/asn_provider/ip",
@@ -193,7 +201,7 @@ var DefaultEndpoints = []Endpoint{
 	},
 	{
 		Name:   "ipinfo",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		// Documented: {"ip":"...","hostname":"...","city":"...",...}.
 		// Generic provider — measured to TIME OUT on RU mobile
@@ -203,7 +211,7 @@ var DefaultEndpoints = []Endpoint{
 	{
 		// Live-verified: `{"ip":"...","success":true}` (37 bytes).
 		Name:   "reg-speedtest",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{URL: "https://speedtest.reg.ru/detect_ip_info", Parser: JSONKey("ip")},
 	},
@@ -211,7 +219,7 @@ var DefaultEndpoints = []Endpoint{
 		// Live-verified: 548 B body with `"ip":"..."` plus
 		// proxy / geo metadata. Plain 200 / JSON shape.
 		Name:   "start-proxycheck",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{
 			URL:    "https://api.start.ru/account/proxycheck?apikey=a20b12b279f744f2b3c7b5c5400c4eb5",
@@ -228,6 +236,12 @@ var DefaultEndpoints = []Endpoint{
 		// entirely. Unlike the HTTP probes this does not depend on
 		// egress direction (works in-RU and abroad) — the primary
 		// STUN probe and a stable backstop for the HTTP tier.
+		//
+		// Family Any: stun.rtc.yandex.net has a AAAA record, so over
+		// tcp6 it returns a v6 reflexive (STUNProbe parses both v4 and
+		// v6 XOR-MAPPED-ADDRESS). The v6 path is AAAA-derived — not
+		// live-verified from a v6 egress, since the test networks were
+		// v4-only — but the server is v6-reachable in principle.
 		Name:              "yandex-stun",
 		Family:            Any,
 		Cost:              CostMinimal,
@@ -274,7 +288,7 @@ var DefaultEndpoints = []Endpoint{
 		// the live response shape differs and the parser misses —
 		// works cleanly from foreign egress.
 		Name:   "alfabank",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{
 			URL: "https://alfabank.ru/api/v2/geo-facade/geo/ip",
@@ -303,7 +317,7 @@ var DefaultEndpoints = []Endpoint{
 		// — 65 bytes. JSONKey("ipAddress") matches inside the
 		// JSONP wrapper just like a plain JSON object.
 		Name:              "mail-ip",
-		Family:            Any,
+		Family:            V4,
 		Cost:              CostMinimal,
 		Prober:            &HTTPProbe{URL: "https://ip.mail.ru/ip.html", Parser: JSONKey("ipAddress")},
 		FilteredReachable: true,
@@ -338,7 +352,7 @@ var DefaultEndpoints = []Endpoint{
 		// to avoid catching the unrelated `120.0.0.0` user-agent
 		// version that also appears in the page.
 		Name:              "mail-speedtest",
-		Family:            Any,
+		Family:            V4,
 		Cost:              6900,
 		Prober:            &HTTPProbe{URL: "https://speedtest.mail.ru/", Parser: Regex(`IP:\s*((?:\d{1,3}\.){3}\d{1,3})`)},
 		FilteredReachable: true,
@@ -352,6 +366,10 @@ var DefaultEndpoints = []Endpoint{
 		// 498 was rejected as non_2xx (the earlier "parser_miss / RU
 		// not guaranteed" note was this missing 498). From foreign
 		// egress the page is HTTP 451 with no IP, hence OptionalFrom.
+		//
+		// Family Any: www.wildberries.ru has a AAAA record, so over
+		// tcp6 the data-req-ip attribute carries a v6 address. v6 path
+		// is AAAA-derived (test networks were v4-only).
 		Name:              "wildberries",
 		Family:            Any,
 		Cost:              1600,
@@ -370,7 +388,7 @@ var DefaultEndpoints = []Endpoint{
 		// Cost CostSmall keeps it out of the parallel API race; it
 		// loses cleanly to sub-100ms JSON endpoints on latency.
 		Name:   "litres",
-		Family: Any,
+		Family: V4,
 		Cost:   CostSmall,
 		Prober: &HTTPProbe{URL: "https://www.litres.ru/", Method: "HEAD", Parser: Cookie("__ddg9_")},
 	},
@@ -387,7 +405,7 @@ var DefaultEndpoints = []Endpoint{
 		// non_2xx on Beeline LTE. So lamoda SUCCEEDS abroad / behind
 		// a VPN and FAILS on RU mobile; OptionalFrom flags it.
 		Name:   "lamoda-vpn-error",
-		Family: Any,
+		Family: V4,
 		Cost:   194,
 		Prober: &HTTPProbe{
 			URL:          "https://www.lamoda.ru/api/v1/recommendations/section",
@@ -404,7 +422,7 @@ var DefaultEndpoints = []Endpoint{
 		// the parser misses cleanly — accepting both codes is safe
 		// because parse failure is a soft error.
 		Name:   "2gis-antibot",
-		Family: Any,
+		Family: V4,
 		Cost:   1411,
 		Prober: &HTTPProbe{
 			URL:          "https://2gis.ru/",
@@ -420,7 +438,7 @@ var DefaultEndpoints = []Endpoint{
 		// breaks this (parser_miss). On RU mobile the 1.77 MB body
 		// often times out within the cycle budget.
 		Name:   "tbank",
-		Family: Any,
+		Family: V4,
 		Cost:   1770000,
 		Prober: &HTTPProbe{URL: "https://www.tbank.ru", Parser: JSONKey("remoteAddress")},
 	},
@@ -441,7 +459,7 @@ var DefaultEndpoints = []Endpoint{
 		// filtering (hence FilteredReachable) but at ~6–14 s and
 		// multiple MB — effectively a last-resort backstop.
 		Name:   "avito",
-		Family: Any,
+		Family: V4,
 		Cost:   4_000_000,
 		Prober: &HTTPProbe{
 			URL:      "https://www.avito.ru/",
@@ -457,7 +475,7 @@ var DefaultEndpoints = []Endpoint{
 		// ~33 KB margin above the IP position; Cost matches MaxBytes
 		// because that is the byte volume actually pulled.
 		Name:              "ivi",
-		Family:            Any,
+		Family:            V4,
 		Cost:              300_000,
 		Prober:            &HTTPProbe{URL: "https://www.ivi.tv/", Parser: JSONKey("ip"), MaxBytes: 300_000},
 		FilteredReachable: true,
@@ -468,7 +486,7 @@ var DefaultEndpoints = []Endpoint{
 		// (`{"code":10403,"data":{"ip":"<ip>"},...}`, 194 B). Plain
 		// GET 400s — needs Method + Body. Same egress caveat.
 		Name:   "lamoda-information-get",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{
 			URL:          "https://www.lamoda.ru/api/v1/information/get",
@@ -485,7 +503,7 @@ var DefaultEndpoints = []Endpoint{
 		// {} → 403 with `data.ip`. Sibling so one flapping API path
 		// doesn't knock out the whole lamoda set. Same egress caveat.
 		Name:   "lamoda-topmenu-flexible",
-		Family: Any,
+		Family: V4,
 		Cost:   CostMinimal,
 		Prober: &HTTPProbe{
 			URL:          "https://www.lamoda.ru/api/v1/cms/topmenu_flexible",
