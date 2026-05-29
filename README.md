@@ -61,8 +61,8 @@ and coalesces, so a noisy callback queues at most one extra cycle.
 ### Custom endpoints
 
 `WithPriorityEndpoints` registers probes that run before the built-in
-defaults on every cycle, so a caller's preferred STUN or TURN server
-wins and the defaults become a fallback.
+defaults on every cycle, so a caller's preferred probe wins and the
+defaults become a fallback.
 
 ```go
 d := vetted.New(
