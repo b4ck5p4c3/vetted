@@ -7,7 +7,7 @@ import (
 )
 
 // Parser extracts an IP candidate string from an endpoint's response.
-// Implementations don't validate the IP — the Discoverer does that
+// Implementations don't validate the IP - the Discoverer does that
 // via net.ParseIP after the parser returns. Keep parsers pure: no
 // IO, no globals, no parse-time allocations past what the regex/JSON
 // walk inherently needs.
@@ -59,7 +59,7 @@ func JSONKey(key string) Parser {
 // JSONQuoted returns a Parser that captures the contents of the
 // first pair of double quotes in the body. Use for endpoints whose
 // entire response is a JSON-quoted IP, like
-// `ipv4-internet.yandex.net/api/v0/ip` → `"159.195.6.55"`.
+// `ipv4-internet.yandex.net/api/v0/ip` -> `"159.195.6.55"`.
 func JSONQuoted() Parser {
 	re := regexp.MustCompile(`"([^"]+)"`)
 	return bodyOnly(func(body []byte) (string, error) {
@@ -105,12 +105,12 @@ func Regex(pattern string) Parser {
 // Cookie returns a Parser that extracts the value of a Set-Cookie
 // header whose name matches `name`. Use for endpoints whose
 // upstream (typically a DDoS-Guard or similar CDN front) echoes
-// the requester's IP into a cookie value — litres.ru with its
+// the requester's IP into a cookie value - litres.ru with its
 // `__ddg9_=<client-ip>` cookie is the canonical example.
 //
 // Multiple Set-Cookie headers are scanned in order; the first
 // matching name wins. The cookie value is returned verbatim
-// (no URL-decode) — DDoS-Guard's IP cookies are plain ASCII.
+// (no URL-decode) - DDoS-Guard's IP cookies are plain ASCII.
 func Cookie(name string) Parser {
 	return ParserFunc(func(h http.Header, _ []byte) (string, error) {
 		// http.Header round-trips Set-Cookie under either canonical
@@ -118,7 +118,7 @@ func Cookie(name string) Parser {
 		// handles both.
 		for _, raw := range h.Values("Set-Cookie") {
 			// Parse manually rather than constructing an
-			// http.Response just for ReadCookies — the format is
+			// http.Response just for ReadCookies - the format is
 			// simple enough: name=value[; attr...].
 			seg := raw
 			if i := indexByte(seg, ';'); i >= 0 {

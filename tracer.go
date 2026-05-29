@@ -16,7 +16,7 @@ import (
 // as opaque and store state elsewhere.
 //
 // All methods may be called from multiple goroutines concurrently
-// — v4 and v6 cycles run in parallel and each fans out across
+// - v4 and v6 cycles run in parallel and each fans out across
 // endpoints. Implementations must be safe for concurrent use OR
 // document the restriction.
 type Tracer interface {

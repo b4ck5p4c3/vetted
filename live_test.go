@@ -1,6 +1,6 @@
 //go:build live
 
-// Live smoke tests. Opt-in only — these hit the real RU-allowlist
+// Live smoke tests. Opt-in only - these hit the real RU-allowlist
 // endpoints over the network and exist to catch upstream rot
 // (antibot reshuffle, parser-key rename, IP filter changes) before
 // users hit it. Run with:
@@ -104,7 +104,7 @@ func TestLive_AllDefaultEndpoints(t *testing.T) {
 	t.Log(b.String())
 
 	// Healthy-library gate. Five wins across families is generous
-	// — even on a heavily filtered network we expect more — but
+	// - even on a heavily filtered network we expect more - but
 	// makes the test useful as a regression alarm without forcing
 	// a maintainer to chase down every transient flake. Only
 	// applies on a full run (every endpoint probed); when the
