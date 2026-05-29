@@ -116,7 +116,8 @@ func (h *HTTPProbe) Probe(ctx context.Context, _ Family, httpClient *http.Client
 		// Fresh reader per attempt - http.Client.Do consumes it.
 		reqBody = bytes.NewReader(h.Body)
 	}
-	req, err := http.NewRequestWithContext(ctx, h.method(), h.URL, reqBody)
+	method := h.method()
+	req, err := http.NewRequestWithContext(ctx, method, h.URL, reqBody)
 	if err != nil {
 		return res, err
 	}
@@ -140,7 +141,7 @@ func (h *HTTPProbe) Probe(ctx context.Context, _ Family, httpClient *http.Client
 	// header-only parsers don't read the body anyway, so passing
 	// an empty slice is semantically correct.
 	var body []byte
-	if h.method() != "HEAD" {
+	if method != "HEAD" {
 		body, err = io.ReadAll(io.LimitReader(resp.Body, h.readCap()))
 		if err != nil {
 			return res, err
@@ -253,7 +254,15 @@ func stunMappedIP(body, txn []byte) (net.IP, error) {
 				return ip, nil
 			}
 		}
-		body = body[4+((alen+3)&^3):]
+		// Attribute values are padded to a 4-byte boundary. A server
+		// that omits the padding on the trailing attribute would push
+		// the padded advance past the buffer, so stop instead of
+		// slicing out of range.
+		next := 4 + ((alen + 3) &^ 3)
+		if next > len(body) {
+			break
+		}
+		body = body[next:]
 	}
 	return nil, fmt.Errorf("stun: no mapped-address attribute")
 }
