@@ -50,7 +50,7 @@ func TestEndpoint_Validate(t *testing.T) {
 }
 
 // TestDefaultEndpoints_AllValidate guarantees that the curated
-// DefaultEndpoints list stays well-formed — every entry must pass
+// DefaultEndpoints list stays well-formed - every entry must pass
 // Validate() so New() doesn't panic on first use.
 func TestDefaultEndpoints_AllValidate(t *testing.T) {
 	for _, ep := range DefaultEndpoints {
@@ -61,7 +61,7 @@ func TestDefaultEndpoints_AllValidate(t *testing.T) {
 }
 
 // TestDefaultEndpoints_UniqueNames pins down the operator contract
-// that endpoint Name is a unique tag — duplicate names break trace
+// that endpoint Name is a unique tag - duplicate names break trace
 // tag aggregation and metric labels.
 func TestDefaultEndpoints_UniqueNames(t *testing.T) {
 	seen := make(map[string]struct{}, len(DefaultEndpoints))
@@ -75,7 +75,7 @@ func TestDefaultEndpoints_UniqueNames(t *testing.T) {
 
 // TestDefaultEndpoints_HasSTUN guards that the one STUN probe found
 // reachable from RU mobile (stun.rtc.yandex.net over TCP) stays in
-// the default set — it is the egress-independent backstop.
+// the default set - it is the egress-independent backstop.
 func TestDefaultEndpoints_HasSTUN(t *testing.T) {
 	for _, ep := range DefaultEndpoints {
 		if s, ok := ep.Prober.(*STUNProbe); ok {
@@ -164,12 +164,12 @@ func TestAttempt_OptionalFromRidesThroughAttempt(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("lamoda-vpn-error not in DefaultEndpoints — annotation scaffolding broken")
+		t.Fatal("lamoda-vpn-error not in DefaultEndpoints - annotation scaffolding broken")
 	}
 }
 
 // TestHTTPProbe_MethodDefault pins down the method() helper: empty
-// Method → GET, set Method → as-is.
+// Method -> GET, set Method -> as-is.
 func TestHTTPProbe_MethodDefault(t *testing.T) {
 	if got := (&HTTPProbe{}).method(); got != "GET" {
 		t.Errorf("empty Method should default to GET, got %q", got)
@@ -180,7 +180,7 @@ func TestHTTPProbe_MethodDefault(t *testing.T) {
 }
 
 // TestHTTPProbe_ReadCap pins down the cap-selection rule. Zero
-// MaxBytes → package default. Non-zero → the value verbatim, even
+// MaxBytes -> package default. Non-zero -> the value verbatim, even
 // when smaller than the package default.
 func TestHTTPProbe_ReadCap(t *testing.T) {
 	if got := (&HTTPProbe{}).readCap(); got != int64(maxResponseBytes) {

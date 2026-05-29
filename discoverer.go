@@ -23,7 +23,7 @@ const (
 
 	// maxResponseBytes caps a single endpoint's response body.
 	// CostHigh endpoints (HTML landings) routinely run 30-100 KB
-	// but only the first few KB carry the IP — capping at 256 KB
+	// but only the first few KB carry the IP - capping at 256 KB
 	// is generous enough to survive a service redesign without
 	// letting a misconfigured endpoint stream megabytes.
 	maxResponseBytes = 256 * 1024
@@ -54,7 +54,7 @@ type Option func(*Discoverer)
 
 // WithEndpoints replaces the default endpoint set. Each endpoint
 // is Validate()d; an invalid entry panics New (programmer error,
-// not runtime error — endpoint sets are typically static).
+// not runtime error - endpoint sets are typically static).
 func WithEndpoints(eps ...Endpoint) Option {
 	return func(d *Discoverer) { d.endpoints = eps }
 }
@@ -62,8 +62,8 @@ func WithEndpoints(eps ...Endpoint) Option {
 // WithPriorityEndpoints registers endpoints that are tried BEFORE
 // the base set (DefaultEndpoints, or whatever WithEndpoints supplied)
 // in every cycle. The whole priority block precedes the whole base
-// block, so a caller's preferred probes — typically STUN/TURN servers
-// it already trusts or has fetched from a live config — always win
+// block, so a caller's preferred probes - typically STUN/TURN servers
+// it already trusts or has fetched from a live config - always win
 // over the built-in defaults, which become a fallback. Priority
 // endpoints are cost-tiered among themselves (cheap-first, same-cost
 // race in parallel) and each is Validate()d at New() like the rest.
@@ -76,7 +76,7 @@ func WithPriorityEndpoints(eps ...Endpoint) Option {
 
 // WithFamilies restricts which IP families Discover races. The
 // default is both V4 and V6. Pass WithFamilies(V4) when the caller
-// knows the host has no IPv6 — the v6 race is then skipped entirely
+// knows the host has no IPv6 - the v6 race is then skipped entirely
 // (no goroutine, no wasted attempts, and crucially no v6-only-host
 // dial timeout), and Result.V6 / V6Err / v6 Attempts stay zero.
 // Any value other than V4 or V6 (e.g. Any) is ignored; if the
@@ -140,7 +140,7 @@ func WithLogger(l *slog.Logger) Option {
 // WithHTTPClient overrides the family-pinned HTTP client. Use
 // when the caller needs custom transport hooks (proxy, socket
 // protector, ...) that this library can't infer. The provided
-// client MUST already be pinned to the named family — passing
+// client MUST already be pinned to the named family - passing
 // a dual-stack client undermines the V4/V6 split.
 func WithHTTPClient(fam Family, c *http.Client) Option {
 	return func(d *Discoverer) {
@@ -198,7 +198,7 @@ func New(opts ...Option) *Discoverer {
 // reject the wrong family, and let the dialer's built-in fallback
 // move on to the next candidate from the resolver result list.
 // For a v6-only hostname like ipv6-internet.yandex.net on a v4-only
-// host, every Control attempt rejects → dial fails — which is the
+// host, every Control attempt rejects -> dial fails - which is the
 // correct outcome for "v6 race on a v4-only network".
 //
 // Replacing surf's internal dialer entirely would lose its DNS-
@@ -217,7 +217,7 @@ func newFamilyClient(family Family, timeout time.Duration) *http.Client {
 // connection attempts to addresses of the wrong IP family. Address
 // arrives as "host:port" with host always a numeric IP literal at
 // this stage (DNS has already resolved). Non-IP host falls through
-// to "allow" — we never get here with a literal hostname.
+// to "allow" - we never get here with a literal hostname.
 func familyControl(want Family) func(network, address string, c syscall.RawConn) error {
 	return func(_ string, address string, _ syscall.RawConn) error {
 		host, _, err := net.SplitHostPort(address)
@@ -261,7 +261,7 @@ type Result struct {
 	Duration  time.Duration
 }
 
-// Attempt is one endpoint × family hit's outcome.
+// Attempt is one endpoint-family hit's outcome.
 type Attempt struct {
 	Endpoint  Endpoint
 	Family    Family
@@ -280,7 +280,7 @@ type Attempt struct {
 // default it races v4 and v6 independently and in parallel; the set
 // of families is narrowed with WithFamilies (e.g. WithFamilies(V4)
 // when the caller knows the host has no v6, which skips the v6 race
-// entirely — no goroutine, no wasted attempts, no v6 timeout). A
+// entirely - no goroutine, no wasted attempts, no v6 timeout). A
 // family that isn't requested leaves its Result fields zero (V6 nil,
 // V6Err nil, no v6 Attempts). Latest() reflects the same result after
 // Discover returns. Safe for concurrent calls; per-cycle context
@@ -337,11 +337,11 @@ func (d *Discoverer) Latest() Result {
 //  1. fires one Discover immediately so Latest() is populated
 //     before the first interval;
 //  2. re-runs every `interval` (default 15min when 0);
-//  3. or on Trigger() — the off-cycle refresh.
+//  3. or on Trigger() - the off-cycle refresh.
 //
 // Set VETTED_DISABLE=1 to suppress the loop entirely (initial
 // Discover and ticker both skipped). Useful only for offline test
-// environments — callers should not normally need this; constructing
+// environments - callers should not normally need this; constructing
 // a Discoverer with a custom (empty) endpoint set is a cleaner way to
 // disable discovery at use-site granularity.
 func (d *Discoverer) Run(ctx context.Context, interval time.Duration) {
@@ -390,7 +390,7 @@ func (d *Discoverer) Trigger() {
 // endpoints within a tier race in parallel, the first to return
 // a parseable family-matching IP wins. Loser attempts within the
 // winning tier are recorded in Attempts but the goroutines may
-// still be in flight when this returns — context cancel via the
+// still be in flight when this returns - context cancel via the
 // caller stops them.
 func (d *Discoverer) runFamily(parent context.Context, fam Family) (net.IP, string, []Attempt, error) {
 	httpClient := d.clientV4
@@ -421,7 +421,7 @@ func (d *Discoverer) runFamily(parent context.Context, fam Family) (net.IP, stri
 
 // raceTier fans out parallel HTTP attempts across one cost tier
 // and returns the first successful one. The tier shares a child
-// context that gets cancelled as soon as a winner lands — losers'
+// context that gets cancelled as soon as a winner lands - losers'
 // in-flight HTTP requests then abort with context.Canceled instead
 // of running to completion. Every attempt still finishes its span
 // (success or canceled) before this returns, so the Tracer sees
@@ -431,7 +431,7 @@ func (d *Discoverer) runFamily(parent context.Context, fam Family) (net.IP, stri
 // cheap API tier routinely contains one fast responder and several
 // stalled / 5-second-timeout endpoints. Without the cancel-on-win
 // short-circuit, every cycle waited for the slowest tier member
-// even though the IP was already in hand — turning a sub-second
+// even though the IP was already in hand - turning a sub-second
 // resolution into a multi-second one.
 func (d *Discoverer) raceTier(parent context.Context, fam Family, httpClient *http.Client, tier []Endpoint) (net.IP, string, []Attempt, error) {
 	type result struct {
@@ -470,7 +470,7 @@ func (d *Discoverer) raceTier(parent context.Context, fam Family, httpClient *ht
 	return nil, "", atts, lastErr
 }
 
-// attempt is the per-endpoint goroutine body — it delegates the
+// attempt is the per-endpoint goroutine body - it delegates the
 // transport (HTTP fetch + parse, or STUN binding) to the endpoint's
 // Prober, then enforces family and records the tracer span. The
 // returned struct is what raceTier collects to build Attempts.
@@ -510,7 +510,7 @@ func (d *Discoverer) attempt(parent context.Context, fam Family, httpClient *htt
 		return
 	}
 	// Family enforcement. A dual-stack endpoint forced onto tcp4
-	// should never return a v6 address — but defence in depth, in
+	// should never return a v6 address - but defence in depth, in
 	// case an intermediate proxy / antibot challenge injects a
 	// different family into the response.
 	is4 := parsed.To4() != nil
@@ -582,7 +582,7 @@ func costTiers(eps []Endpoint, fam Family, maxCost Cost) [][]Endpoint {
 // classifyErr buckets a failure reason into a small tag-friendly
 // set so trace tags and metrics can count by category instead of
 // unique-string counting. The categories are the public contract
-// of Attempt.FailReason — renaming a bucket fragments operator
+// of Attempt.FailReason - renaming a bucket fragments operator
 // dashboards that pin on these values.
 func classifyErr(err error) string {
 	if err == nil {

@@ -23,15 +23,15 @@ type ProbeResult struct {
 
 // Prober is the transport-specific half of an Endpoint. The
 // Discoverer owns the family race, cost tiering, cancellation and
-// tracing; a Prober owns one thing — given the race family and the
+// tracing; a Prober owns one thing - given the race family and the
 // family-pinned HTTP client, return the public IP this endpoint
 // reports. HTTP probers fetch + parse with the supplied client;
 // STUN probers dial their own family-appropriate connection and
 // ignore it. New transports (HTTP/3 IP echo, a different STUN
-// dialect, ...) only need to implement this interface — the rest
+// dialect, ...) only need to implement this interface - the rest
 // of the Discoverer doesn't change.
 type Prober interface {
-	// Probe runs one attempt. fam is always V4 or V6 (never Any) —
+	// Probe runs one attempt. fam is always V4 or V6 (never Any) -
 	// the Discoverer expands an Any endpoint into one call per
 	// family. On the error path Probe should still populate
 	// ProbeResult.HTTPStatus when it has one.
@@ -113,10 +113,11 @@ func (h *HTTPProbe) Probe(ctx context.Context, _ Family, httpClient *http.Client
 	var res ProbeResult
 	var reqBody io.Reader
 	if h.Body != nil {
-		// Fresh reader per attempt — http.Client.Do consumes it.
+		// Fresh reader per attempt - http.Client.Do consumes it.
 		reqBody = bytes.NewReader(h.Body)
 	}
-	req, err := http.NewRequestWithContext(ctx, h.method(), h.URL, reqBody)
+	method := h.method()
+	req, err := http.NewRequestWithContext(ctx, method, h.URL, reqBody)
 	if err != nil {
 		return res, err
 	}
@@ -133,14 +134,14 @@ func (h *HTTPProbe) Probe(ctx context.Context, _ Family, httpClient *http.Client
 		return res, fmt.Errorf("http %d", resp.StatusCode)
 	}
 
-	// HEAD never carries a body — skip the read so a server that
+	// HEAD never carries a body - skip the read so a server that
 	// sent Content-Length but no payload (correct for HEAD per
 	// RFC 9110, but trips io.ReadAll under surf's HTTP/2 transport
 	// with "unexpected EOF") doesn't fail the cycle. Cookie /
 	// header-only parsers don't read the body anyway, so passing
 	// an empty slice is semantically correct.
 	var body []byte
-	if h.method() != "HEAD" {
+	if method != "HEAD" {
 		body, err = io.ReadAll(io.LimitReader(resp.Body, h.readCap()))
 		if err != nil {
 			return res, err
@@ -253,7 +254,15 @@ func stunMappedIP(body, txn []byte) (net.IP, error) {
 				return ip, nil
 			}
 		}
-		body = body[4+((alen+3)&^3):]
+		// Attribute values are padded to a 4-byte boundary. A server
+		// that omits the padding on the trailing attribute would push
+		// the padded advance past the buffer, so stop instead of
+		// slicing out of range.
+		next := 4 + ((alen + 3) &^ 3)
+		if next > len(body) {
+			break
+		}
+		body = body[next:]
 	}
 	return nil, fmt.Errorf("stun: no mapped-address attribute")
 }
@@ -261,7 +270,7 @@ func stunMappedIP(body, txn []byte) (net.IP, error) {
 // parseXORMapped decodes XOR-MAPPED-ADDRESS for IPv4 (family 0x01) and
 // IPv6 (0x02). For v4 the 4 address bytes are XORed with the magic
 // cookie; for v6 the first 4 are XORed with the cookie and the
-// remaining 12 with the request transaction ID (RFC 5389 §15.2).
+// remaining 12 with the request transaction ID, per RFC 5389 section 15.2.
 func parseXORMapped(v, txn []byte) (net.IP, error) {
 	switch {
 	case len(v) >= 8 && v[1] == 0x01: // IPv4

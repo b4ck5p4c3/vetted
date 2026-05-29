@@ -51,7 +51,7 @@ func serveSTUN(conn net.Conn, ip net.IP, port uint16) {
 	// Echo back the transaction ID from the request (bytes 8..20).
 	txn := hdr[8:20]
 	// XOR-MAPPED-ADDRESS attribute value: reserved, family, x-port,
-	// x-address. v4 → 4 address bytes XOR cookie; v6 → 16 bytes,
+	// x-address. v4 -> 4 address bytes XOR cookie; v6 -> 16 bytes,
 	// first 4 XOR cookie, rest XOR transaction ID.
 	var attrVal []byte
 	if v4 := ip.To4(); v4 != nil {
@@ -149,10 +149,10 @@ func TestSTUNProbe_EndToEndThroughDiscover(t *testing.T) {
 }
 
 // TestSTUNProbe_DialFailureClassifies confirms that an unreachable
-// STUN address fails the attempt without crashing — the address is
+// STUN address fails the attempt without crashing - the address is
 // valid host:port but nothing listens.
 func TestSTUNProbe_DialFailureClassifies(t *testing.T) {
-	// Reserved TEST-NET-1 address, port 1 — connection refused / times
+	// Reserved TEST-NET-1 address, port 1 - connection refused / times
 	// out quickly, never succeeds.
 	p := &STUNProbe{Addr: "192.0.2.1:1"}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)

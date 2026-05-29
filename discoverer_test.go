@@ -1,6 +1,6 @@
 package vetted
 
-// Discoverer tests. Hermetic — everything runs against httptest
+// Discoverer tests. Hermetic - everything runs against httptest
 // servers, no live network. Hand-rolled scaffold tests are kept
 // (TestDiscover_ResolvesIPFromQmsShape, TestEligibleTiers_*) and
 // extended with race / fallback / Trigger / family-mismatch / error
@@ -21,7 +21,7 @@ import (
 	"time"
 )
 
-// TestDiscover_ResolvesIPFromQmsShape — sanity check that the
+// TestDiscover_ResolvesIPFromQmsShape - sanity check that the
 // Discoverer can do one full cycle against a fake endpoint shaped
 // like qms.ru. Verifies: header forwarding, JSONKey parser,
 // scope-tag-shaped result.
@@ -63,7 +63,7 @@ func TestDiscover_ResolvesIPFromQmsShape(t *testing.T) {
 // algorithm: endpoints with equal Cost go into one tier; tiers are
 // sorted ascending so cheap tiers fire first. Breaking this would
 // silently make expensive endpoints race in parallel with cheap
-// ones — load-bearing for the metered-network use case.
+// ones - load-bearing for the metered-network use case.
 func TestEligibleTiers_CostOrderAndGrouping(t *testing.T) {
 	d := New(WithEndpoints(
 		Endpoint{Name: "expensive", Family: Any, Cost: CostHigh, Prober: &HTTPProbe{URL: "u", Parser: JSONQuoted()}},
@@ -161,7 +161,7 @@ func TestDiscover_RaceFirstResponderWins(t *testing.T) {
 // TestWithFamilies_V4OnlySkipsV6Race verifies that WithFamilies(V4)
 // runs only the v4 race: the v6 race never spawns, so an Any endpoint
 // is hit once (v4) not twice, and Result.V6 / V6Err / v6 Attempts
-// stay zero. This is the "caller knows there's no v6" fast path —
+// stay zero. This is the "caller knows there's no v6" fast path -
 // it avoids the v6-only-host dial timeout that otherwise dominates a
 // cycle on a v4-only network.
 func TestWithFamilies_V4OnlySkipsV6Race(t *testing.T) {
@@ -191,12 +191,12 @@ func TestWithFamilies_V4OnlySkipsV6Race(t *testing.T) {
 	}
 	for _, a := range res.Attempts {
 		if a.Family == V6 {
-			t.Errorf("found a V6 attempt (%s) — v6 race should be skipped", a.Endpoint.Name)
+			t.Errorf("found a V6 attempt (%s) - v6 race should be skipped", a.Endpoint.Name)
 		}
 	}
 }
 
-// TestWithFamilies_EmptyKeepsDefault — passing no valid family (or
+// TestWithFamilies_EmptyKeepsDefault - passing no valid family (or
 // only Any) must not disable discovery; the default both-families
 // set is kept.
 func TestWithFamilies_EmptyKeepsDefault(t *testing.T) {
@@ -225,7 +225,7 @@ func TestPriorityEndpoints_TriedBeforeDefaults(t *testing.T) {
 
 	d := New(
 		// Base endpoint is CHEAPER (CostMinimal) than the priority one
-		// (CostHigh) — yet priority must still win because the priority
+		// (CostHigh) - yet priority must still win because the priority
 		// block is tried in full before the base block.
 		WithEndpoints(Endpoint{Name: "base", Family: V4, Cost: CostMinimal, Prober: &HTTPProbe{URL: base.URL, Parser: JSONKey("ip")}}),
 		WithPriorityEndpoints(Endpoint{Name: "prio", Family: V4, Cost: CostHigh, Prober: &HTTPProbe{URL: prio.URL, Parser: JSONKey("ip")}}),
@@ -244,7 +244,7 @@ func TestPriorityEndpoints_TriedBeforeDefaults(t *testing.T) {
 		t.Error("priority endpoint never hit")
 	}
 	if baseHit.Load() != 0 {
-		t.Errorf("base endpoint hit %d times — should not run when priority succeeds", baseHit.Load())
+		t.Errorf("base endpoint hit %d times - should not run when priority succeeds", baseHit.Load())
 	}
 }
 
@@ -306,7 +306,7 @@ func TestRaceTier_CancelsLosersOnFirstWin(t *testing.T) {
 	t.Cleanup(slow.Close)
 
 	// Family: V4 on both so the v6 race exits immediately with
-	// "no eligible endpoints" — otherwise the v6 race would still
+	// "no eligible endpoints" - otherwise the v6 race would still
 	// wait for both endpoints to return (family_mismatch never
 	// triggers the cancel-on-win path) and mask the v4 short-circuit.
 	d := New(
@@ -330,7 +330,7 @@ func TestRaceTier_CancelsLosersOnFirstWin(t *testing.T) {
 		t.Fatalf("V4 = %v, want 203.0.113.1", res.V4)
 	}
 	if !slowReached.Load() {
-		t.Fatal("slow endpoint never received a request — race scaffolding broken")
+		t.Fatal("slow endpoint never received a request - race scaffolding broken")
 	}
 	var slowAtt *Attempt
 	for i := range res.Attempts {
@@ -341,7 +341,7 @@ func TestRaceTier_CancelsLosersOnFirstWin(t *testing.T) {
 		}
 	}
 	if slowAtt == nil {
-		t.Fatal("no v4 Attempt recorded for slow endpoint — telemetry lost")
+		t.Fatal("no v4 Attempt recorded for slow endpoint - telemetry lost")
 	}
 	if slowAtt.FailReason != "canceled" {
 		t.Errorf("slow Attempt FailReason = %q, want canceled (err=%v)", slowAtt.FailReason, slowAtt.Err)
@@ -373,8 +373,8 @@ func TestDiscover_FallsThroughCheapTier(t *testing.T) {
 	if res.V4Source != "expensive-ok" {
 		t.Errorf("V4Source = %q, want expensive-ok (fell through cheap tier)", res.V4Source)
 	}
-	// Both attempts should be recorded — the cheap miss AND the
-	// expensive win — for the v4 family.
+	// Both attempts should be recorded - the cheap miss AND the
+	// expensive win - for the v4 family.
 	var sawBroken, sawOk bool
 	for _, a := range res.Attempts {
 		if a.Family != V4 {
@@ -395,7 +395,7 @@ func TestDiscover_FallsThroughCheapTier(t *testing.T) {
 	}
 }
 
-// TestAttempt_FamilyMismatchRejection — when an endpoint returns
+// TestAttempt_FamilyMismatchRejection - when an endpoint returns
 // an IP of the wrong family (e.g. v4 race gets a v6 address back),
 // the attempt must error with FailReason = "family_mismatch". Real-
 // world cause: an antibot interstitial that hardcodes an example
@@ -434,7 +434,7 @@ func TestAttempt_FamilyMismatchRejection(t *testing.T) {
 	}
 }
 
-// TestAttempt_ErrorClassification — the four hot-path classifier
+// TestAttempt_ErrorClassification - the four hot-path classifier
 // outcomes: timeout/canceled live in classifyErr() direct tests,
 // while the remaining buckets ride through a real httptest cycle so
 // the wrapping (http.Do wrappers, surf, etc.) doesn't quietly
@@ -538,7 +538,7 @@ func TestAttempt_HeaderForwarding(t *testing.T) {
 	}
 }
 
-// TestTrigger_OffCycleDiscoveryFires — Run is blocked on a long
+// TestTrigger_OffCycleDiscoveryFires - Run is blocked on a long
 // interval; Trigger() forces one Discover cycle. Verified by the
 // hit counter on the httptest server moving past the initial run.
 func TestTrigger_OffCycleDiscoveryFires(t *testing.T) {
@@ -560,7 +560,7 @@ func TestTrigger_OffCycleDiscoveryFires(t *testing.T) {
 	t.Cleanup(cancel)
 	done := make(chan struct{})
 	go func() {
-		// Long interval — only the initial discover + Trigger()s
+		// Long interval - only the initial discover + Trigger()s
 		// should fire during the test window.
 		d.Run(ctx, time.Hour)
 		close(done)
@@ -570,7 +570,7 @@ func TestTrigger_OffCycleDiscoveryFires(t *testing.T) {
 		<-done
 	})
 
-	// Wait for the initial discover (1 hit on v4 + 1 on v6 — same
+	// Wait for the initial discover (1 hit on v4 + 1 on v6 - same
 	// http handler, two independent clients).
 	waitForHits(t, &hits, 2, 2*time.Second)
 
@@ -578,7 +578,7 @@ func TestTrigger_OffCycleDiscoveryFires(t *testing.T) {
 	waitForHits(t, &hits, 4, 2*time.Second)
 }
 
-// TestTrigger_MultipleCallsCoalesce — fire Trigger() many times
+// TestTrigger_MultipleCallsCoalesce - fire Trigger() many times
 // while Discover is in flight; only ONE extra cycle should result
 // once the in-flight cycle completes. Buffered chan of size 1
 // + non-blocking send is the mechanism.
@@ -618,7 +618,7 @@ func TestTrigger_MultipleCallsCoalesce(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		d.Trigger()
 	}
-	// Release the initial cycle (2 hits — v4 + v6). The coalesced
+	// Release the initial cycle (2 hits - v4 + v6). The coalesced
 	// trigger then fires one more cycle (another 2 hits).
 	// Drain four releases of the gate.
 	var wg sync.WaitGroup
@@ -632,7 +632,7 @@ func TestTrigger_MultipleCallsCoalesce(t *testing.T) {
 	wg.Wait()
 	waitForHits(t, &hits, 4, 3*time.Second)
 
-	// Give the loop a small extra window — if Trigger() did NOT
+	// Give the loop a small extra window - if Trigger() did NOT
 	// coalesce, a 5th hit would queue up. Spin with a deadline
 	// rather than time.Sleep to avoid eating clock time on success.
 	deadline := time.Now().Add(300 * time.Millisecond)
@@ -643,7 +643,7 @@ func TestTrigger_MultipleCallsCoalesce(t *testing.T) {
 	}
 }
 
-// TestRun_EnvDisable — VETTED_DISABLE=1 short-circuits Run so
+// TestRun_EnvDisable - VETTED_DISABLE=1 short-circuits Run so
 // neither the initial Discover nor the ticker fires.
 func TestRun_EnvDisable(t *testing.T) {
 	var hits atomic.Int64
@@ -678,7 +678,7 @@ func TestRun_EnvDisable(t *testing.T) {
 	}
 }
 
-// TestNoEligibleEndpoints — a Discoverer whose endpoints are all
+// TestNoEligibleEndpoints - a Discoverer whose endpoints are all
 // for the wrong family (or capped out by maxCost) must surface a
 // clear per-family error, not panic.
 func TestNoEligibleEndpoints(t *testing.T) {
@@ -694,7 +694,7 @@ func TestNoEligibleEndpoints(t *testing.T) {
 	}
 }
 
-// TestLatestSnapshot — Latest() returns the most recent Result and
+// TestLatestSnapshot - Latest() returns the most recent Result and
 // is safe to call before any Discover (zero value).
 func TestLatestSnapshot(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -751,7 +751,7 @@ func TestAttempt_MaxBytesAllowsLargeBodies(t *testing.T) {
 	// We use a Regex parser to specifically match the marker.
 	markerParser := Regex(`"real":"ip":"((?:\d{1,3}\.){3}\d{1,3})"`)
 
-	// Default cap (MaxBytes=0): should miss — parser_miss.
+	// Default cap (MaxBytes=0): should miss - parser_miss.
 	{
 		d := New(
 			WithEndpoints(Endpoint{
@@ -841,7 +841,7 @@ func TestAttempt_MethodAndBodyForwarded(t *testing.T) {
 	}
 }
 
-// TestAttempt_DefaultsGETWithNilBody — explicit negative: empty
+// TestAttempt_DefaultsGETWithNilBody - explicit negative: empty
 // Method + nil Body must still produce a GET with no request body,
 // matching pre-Method-field behaviour for every existing endpoint.
 func TestAttempt_DefaultsGETWithNilBody(t *testing.T) {
@@ -875,7 +875,7 @@ func TestAttempt_DefaultsGETWithNilBody(t *testing.T) {
 
 // TestAttempt_HEADWithCookieParser pins the litres optimisation:
 // when an endpoint's parser only needs headers (Cookie parser),
-// HEAD is enough — the upstream must see HEAD, not GET, and the
+// HEAD is enough - the upstream must see HEAD, not GET, and the
 // parser must extract the IP from the response header even though
 // the body is empty. Saves ~256 KB per cycle on the litres path,
 // which is the load-bearing win on metered mobile data.
@@ -912,7 +912,7 @@ func TestAttempt_HEADWithCookieParser(t *testing.T) {
 		t.Errorf("upstream Method = %q, want HEAD", got)
 	}
 	if bodyBytes.Load() != 0 {
-		t.Errorf("upstream wrote %d body bytes — HEAD should never reach the GET branch", bodyBytes.Load())
+		t.Errorf("upstream wrote %d body bytes - HEAD should never reach the GET branch", bodyBytes.Load())
 	}
 }
 

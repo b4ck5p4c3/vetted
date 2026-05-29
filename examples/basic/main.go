@@ -28,7 +28,7 @@ func main() {
 	for _, a := range res.Attempts {
 		status := "ok"
 		if a.Err != nil {
-			status = a.FailReason + " — " + a.Err.Error()
+			status = a.FailReason + " - " + a.Err.Error()
 		}
 		fmt.Printf("  %-12s %-3s cost=%-6d %4dms  http=%-3d  %s\n",
 			a.Endpoint.Name, a.Family, a.Endpoint.Cost,

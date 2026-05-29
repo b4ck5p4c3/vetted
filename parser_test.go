@@ -2,7 +2,7 @@ package vetted
 
 // Parser tests. One positive + one or more negative cases per parser
 // type, plus snapshots of the real response shapes observed during
-// live verification of DefaultEndpoints — kept inline (not under
+// live verification of DefaultEndpoints - kept inline (not under
 // testdata/) so the expected wire format is obvious to a reviewer.
 
 import (
@@ -27,8 +27,8 @@ func TestJSONKey_PositiveAndNegative(t *testing.T) {
 	}
 
 	// Unquoted value: JSONKey only matches `"k":"v"` (string value).
-	// {"ip":1234567} is not a parser-fail by spec — the key has no
-	// QUOTED value — so a miss is the correct outcome.
+	// {"ip":1234567} is not a parser-fail by spec - the key has no
+	// QUOTED value - so a miss is the correct outcome.
 	if _, err := p.Parse(nil, []byte(`{"ip":1234567}`)); err == nil {
 		t.Errorf("expected error when value not quoted, got nil")
 	}
@@ -36,7 +36,7 @@ func TestJSONKey_PositiveAndNegative(t *testing.T) {
 
 func TestJSONKey_WhitespaceAndJSONPWrapper(t *testing.T) {
 	p := JSONKey("ipAddress")
-	// Snapshot of `ip.mail.ru/ip.html` — JSONP wrapper around a
+	// Snapshot of `ip.mail.ru/ip.html` - JSONP wrapper around a
 	// flat object. JSONKey ignores the wrapper because the regex
 	// doesn't anchor to `{`.
 	const mailIPBody = `(none)({"ipAddress": "159.195.6.55", "xForwardedFor": "(none)"})`
@@ -52,7 +52,7 @@ func TestJSONKey_WhitespaceAndJSONPWrapper(t *testing.T) {
 func TestJSONQuoted_PositiveAndNegative(t *testing.T) {
 	p := JSONQuoted()
 
-	// Snapshot of `ipv4-internet.yandex.net/api/v0/ip` — a single
+	// Snapshot of `ipv4-internet.yandex.net/api/v0/ip` - a single
 	// quoted IP literal.
 	got, err := p.Parse(nil, []byte(`"159.195.6.55"`))
 	if err != nil {
@@ -87,7 +87,7 @@ func TestHTMLAttr_PositiveAndNegative(t *testing.T) {
 }
 
 func TestRegex_CaptureGroupHandling(t *testing.T) {
-	// Snapshot of speedtest.mail.ru — `<p>IP: 1.2.3.4</p>` markup,
+	// Snapshot of speedtest.mail.ru - `<p>IP: 1.2.3.4</p>` markup,
 	// alongside an unrelated `120.0.0.0` (user-agent version) that
 	// the parser must NOT catch.
 	const mailSpeedtestFragment = `<script>var ua="Chrome/120.0.0.0";</script><p>IP: 159.195.6.55</p>`
@@ -106,7 +106,7 @@ func TestRegex_CaptureGroupHandling(t *testing.T) {
 	}
 }
 
-// TestYandexInternetState — snapshot of the v4/v6 keys lifted from
+// TestYandexInternetState - snapshot of the v4/v6 keys lifted from
 // yandex.ru/internet/'s embedded state JSON. Crucially the page
 // ALSO contains `"ip":"<city name>"` from a different schema branch,
 // so a naive JSONKey("ip") parser would catch the city. The agent-
@@ -139,7 +139,7 @@ func TestYandexInternetState(t *testing.T) {
 	}
 }
 
-// TestTbankStateJSON — snapshot of the `remoteAddress` JSON island
+// TestTbankStateJSON - snapshot of the `remoteAddress` JSON island
 // from www.tbank.ru's landing page. Pinned because that island sits
 // at byte ~255 KB in the live body, right against the Discoverer's
 // 256 KB cap; the parser shape itself must keep working even if the
@@ -172,7 +172,7 @@ func TestParserFuncAdapter(t *testing.T) {
 	}
 }
 
-// TestLamodaVPNErrorShape — snapshot of the 403 VPN-detected body
+// TestLamodaVPNErrorShape - snapshot of the 403 VPN-detected body
 // shared by /recommendations/section, /information/get and
 // /cms/topmenu_flexible. The IP rides as `data.ip`; JSONKey("ip")
 // matches the first "ip":"..." token in the JSON regardless of
@@ -190,7 +190,7 @@ func TestLamodaVPNErrorShape(t *testing.T) {
 	}
 }
 
-// TestIviStateShape — snapshot of the single `"ip":"..."` token
+// TestIviStateShape - snapshot of the single `"ip":"..."` token
 // from ivi.tv's embedded state JSON. Live body is 748 KB with the
 // token at byte ~266 K; the parser shape itself is plain JSONKey
 // and the byte-offset constraint lives on Endpoint.MaxBytes. Pin
@@ -210,7 +210,7 @@ func TestIviStateShape(t *testing.T) {
 	}
 }
 
-// TestCookieParser_LitresShape — snapshot of the DDoS-Guard cookie
+// TestCookieParser_LitresShape - snapshot of the DDoS-Guard cookie
 // pair that fronts litres.ru. The IP rides in `__ddg9_=<ip>`
 // alongside several sibling cookies (`__ddg8_`, `__ddg10_`,
 // `__ddg1_`, etc.); the parser must pick only the named one and
